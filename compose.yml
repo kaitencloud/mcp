@@ -1,0 +1,18 @@
+# The MCP server on its own, against a Kaiten API you are already running.
+#
+# KAITEN_API_BASE_URL has to be reachable from inside this container, so the
+# default assumes a Kaiten stack on the same machine rather than on localhost.
+services:
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kaiten-mcp
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    environment:
+      MCP_PORT: 8000
+      KAITEN_API_BASE_URL: ${KAITEN_API_BASE_URL:-http://host.docker.internal:6060/api}
+      FASTMCP_EXPERIMENTAL_ENABLE_NEW_OPENAPI_PARSER: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
