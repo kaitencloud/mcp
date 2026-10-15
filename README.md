@@ -66,7 +66,7 @@ It speaks both standard MCP transports:
 
 ```bash
 # from a checkout, with uv
-KAITEN_API_BASE_URL=http://localhost:6000/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
+KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
 uv run kaiten-mcp http --port 8000
 
 # without a checkout (the repository is private: uv needs git access to it)
@@ -83,7 +83,7 @@ get a token.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `KAITEN_API_BASE_URL` | `http://localhost:6000/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
+| `KAITEN_API_BASE_URL` | `http://localhost:6060/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
 | `KAITEN_API_TOKEN` | | The token for stdio, or for an HTTP request that brings none |
 | `KAITEN_MCP_READ_ONLY` | `false` | Register read tools only (also `--read-only`) |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP listener |

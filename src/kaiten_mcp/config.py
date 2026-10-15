@@ -32,7 +32,7 @@ def load() -> Settings:
     base = (
         os.getenv("KAITEN_API_BASE_URL")
         or os.getenv("KAITEN_API_URL")
-        or "http://localhost:6000/api"
+        or "http://localhost:6060/api"
     )
     return Settings(
         api_base_url=base.rstrip("/"),

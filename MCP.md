@@ -9,7 +9,7 @@ Two ways to reach the server, and every client below supports at least one:
 | Address | — | `/mcp` on the server itself (`http://localhost:8000/mcp` with this repo's `compose.yml`), or behind a gateway that routes it: the SaaS stack's does, at `http://localhost:6100/mcp` |
 
 The SaaS gateway's `/mcp` route only accepts a `ksh_` organization token: a console JWT or a platform
-credential is refused before it reaches the server. Kaiten's OSS gateway (port 6000) has no `/mcp` route;
+credential is refused before it reaches the server. Kaiten's OSS gateway (port 6060) has no `/mcp` route;
 run the server next to it and call the server directly.
 
 ## Getting a token
@@ -101,7 +101,7 @@ curl http://localhost:6100/mcp/health
 ```
 
 Against any other Kaiten, `docker compose up -d` here runs the server on its own, on `localhost:8000/mcp`,
-pointed at `KAITEN_API_BASE_URL` (by default a gateway on the host's port 6000).
+pointed at `KAITEN_API_BASE_URL` (by default a gateway on the host's port 6060).
 
 ## Troubleshooting
 

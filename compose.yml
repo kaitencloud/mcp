@@ -12,7 +12,7 @@ services:
     ports:
       - "${MCP_PORT:-8000}:8000"
     environment:
-      KAITEN_API_BASE_URL: ${KAITEN_API_BASE_URL:-http://host.docker.internal:6000/api}
+      KAITEN_API_BASE_URL: ${KAITEN_API_BASE_URL:-http://host.docker.internal:6060/api}
       KAITEN_MCP_READ_ONLY: ${KAITEN_MCP_READ_ONLY:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
