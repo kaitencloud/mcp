@@ -1,49 +1,30 @@
-# Kaiten MCP Server Dockerfile
-# Multi-stage build with uv for fast, reproducible builds
+# Kaiten MCP server.
+#
+#   docker run -p 8000:8000 -e KAITEN_API_BASE_URL=https://kaiten.example.com/api ghcr.io/kaitencloud/mcp
+#       Streamable HTTP at /mcp; each request authenticates with its own bearer token.
+#   docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/mcp stdio
+#       stdio, for a local client that spawns the server.
 
 ARG PYTHON_BASE=3.13-slim
 
-# =============================================================================
-# Builder stage: Install dependencies and compile bytecode
-# =============================================================================
 FROM python:$PYTHON_BASE AS builder
-
-# Install uv
 COPY --from=ghcr.io/astral-sh/uv:0.9.1 /uv /uvx /bin/
-
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 WORKDIR /app
+# Dependencies first, so a source change does not reinstall them.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
+COPY README.md ./
+COPY src ./src
+RUN uv sync --locked --no-dev --no-editable
 
-# Install dependencies (not the project itself - we run server.py directly)
-COPY pyproject.toml uv.lock* ./
-RUN uv sync --locked --compile-bytecode --no-install-project --no-dev || \
-    uv sync --compile-bytecode --no-install-project --no-dev
-
-# =============================================================================
-# Runtime stage: Minimal image with only what's needed to run
-# =============================================================================
 FROM python:$PYTHON_BASE
-
 WORKDIR /app
-
-# Copy virtual environment from builder
 COPY --from=builder --chown=1000:1000 /app/.venv /app/.venv
-
-# Copy application files
-COPY --chown=1000:1000 server.py ./server.py
-
-# Run as non-root user for security
 USER 1000
-
-# Environment configuration
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
-
-# Expose the MCP server port
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1 MCP_PORT=8000
 EXPOSE 8000
-
-# Health check using the /health endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5).raise_for_status()"
-
-# Run the MCP server
-CMD ["python", "server.py"]
+    CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"MCP_PORT\"]}/health', timeout=5)" || exit 1
+ENTRYPOINT ["kaiten-mcp"]
+CMD ["http"]

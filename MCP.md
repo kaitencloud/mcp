@@ -1,301 +1,121 @@
-# Kaiten MCP Server
+# Connecting a client
 
-The Kaiten MCP (Model Context Protocol) server allows AI assistants like **Claude Desktop**, **Cursor**, and **GitHub Copilot** to interact directly with the Kaiten API using natural language.
+Two ways to reach the server, and every client below supports at least one:
 
-## Overview
+| | stdio | Streamable HTTP |
+| --- | --- | --- |
+| Who runs the server | your client spawns it, on your machine | a deployment, behind Kaiten's gateway |
+| Where the token goes | `KAITEN_API_TOKEN` in the server's environment | an `Authorization: Bearer ksh_...` header on every request |
+| Address | — | `/mcp` on the server itself (`http://localhost:8000/mcp` with this repo's `compose.yml`), or behind a gateway that routes it: the SaaS stack's does, at `http://localhost:6100/mcp` |
 
-The MCP server exposes all Kaiten API operations as MCP tools, enabling AI assistants to:
-- Manage customers, licenses, and entitlements
-- Configure feature flags
-- Create and manage instances
-- Handle service accounts and tokens
-- And more...
+The SaaS gateway's `/mcp` route only accepts a `ksh_` organization token: a console JWT or a platform
+credential is refused before it reaches the server. Kaiten's OSS gateway (port 6000) has no `/mcp` route;
+run the server next to it and call the server directly.
 
-## Prerequisites
+## Getting a token
 
-1. **A running Kaiten API**: start one from [kaitencloud/kaiten](https://github.com/kaitencloud/kaiten) (`task up`)
-2. **API Token (PAT)**: You need a Personal Access Token (PAT) starting with `ksh_` to authenticate
+A token belongs to a service account in your organization. In the console: **Integrations → Service
+accounts**, create one (e.g. "MCP"), then issue a token and copy it — it starts with `ksh_` and is shown
+once. Grant what the agent should be able to do: `read:*` for an agent that only looks, `read:*` and
+`write:*` for one that operates. An agent that already has access can issue one with `kaiten_issue_token`.
 
-### Generating a PAT Token
-
-1. Log into the Kaiten web application
-2. Navigate to **Integrations** → **Service accounts**
-3. Create a new Service Account (e.g., "MCP Integration")
-4. Generate a new token for the service account
-5. Copy the token (starts with `ksh_`) - this is shown only once!
-
-## Local Development Setup
-
-The `mcp` service lives behind the `mcp` Docker Compose profile and isn't
-wired into a `task` yet. With the core stack already up, start it manually:
+## Claude Code
 
 ```bash
-docker compose up -d --build
+# remote (Streamable HTTP)
+claude mcp add --transport http kaiten http://localhost:6100/mcp \
+  --header "Authorization: Bearer ksh_..."
+
+# local (stdio)
+claude mcp add kaiten \
+  -e KAITEN_API_BASE_URL=http://localhost:6100/api -e KAITEN_API_TOKEN=ksh_... \
+  -- uvx --from git+https://github.com/kaitencloud/mcp kaiten-mcp stdio
 ```
 
-The MCP server will be available at: `http://localhost:${KAITEN_PORT}/mcp`
+## Claude Desktop
 
-> **Note**: The MCP server automatically fetches the OpenAPI spec from the API at startup, so it's always in sync with the latest API version.
->
-> The client's `Authorization` header is forwarded to the API, so each user's permissions are respected.
-
----
-
-## Client Configuration
-
-### Claude Desktop
-
-Claude Desktop uses a JSON configuration file to define MCP servers.
-
-#### Configuration File Location
-
-| OS | Path |
-|---|---|
-| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Linux | `~/.config/claude/claude_desktop_config.json` |
-
-#### Configuration
-
-Create or edit the configuration file:
+`claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`)
+starts local servers:
 
 ```json
 {
   "mcpServers": {
     "kaiten": {
-      "url": "http://localhost:3080/mcp",
-      "transport": "http",
-      "headers": {
-        "Authorization": "Bearer ksh_YOUR_TOKEN_HERE"
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/kaitencloud/mcp", "kaiten-mcp", "stdio"],
+      "env": {
+        "KAITEN_API_BASE_URL": "http://localhost:6100/api",
+        "KAITEN_API_TOKEN": "ksh_..."
       }
     }
   }
 }
 ```
 
-> **Note**: Replace `3080` with your `KAITEN_PORT` value and `ksh_YOUR_TOKEN_HERE` with your actual PAT token.
+With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm", "-e", "KAITEN_API_BASE_URL",
+"-e", "KAITEN_API_TOKEN", "kaiten-mcp", "stdio"]`, with the same `env`. A remote server is added from
+**Settings → Connectors** instead.
 
-#### Restart Claude Desktop
+## Cursor
 
-After saving the configuration, restart Claude Desktop completely:
-- macOS: `Cmd+Q` to quit, then reopen
-- Windows: Close from system tray, then reopen
-
-#### Verify Connection
-
-In Claude Desktop, you should see the Kaiten tools available. Try asking:
-> "List all customers in Kaiten"
-
----
-
-### Cursor
-
-Cursor supports MCP servers through its settings.
-
-#### Option 1: Via Settings UI
-
-1. Open Cursor
-2. Go to **Settings** (⌘/Ctrl + ,)
-3. Search for "MCP"
-4. Click **Add MCP Server**
-5. Configure:
-   - **Name**: `Kaiten`
-   - **Type**: `HTTP` (Streamable HTTP)
-   - **URL**: `http://localhost:3080/mcp`
-   - **Headers**: Add `Authorization: Bearer ksh_YOUR_TOKEN_HERE`
-
-#### Option 2: Via Configuration File
-
-Create or edit `.cursor/mcp.json` in your project root:
+`.cursor/mcp.json` in a project, or `~/.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "kaiten": {
-      "url": "http://localhost:3080/mcp",
-      "transport": "http",
-      "headers": {
-        "Authorization": "Bearer ksh_YOUR_TOKEN_HERE"
-      }
+      "url": "http://localhost:6100/mcp",
+      "headers": { "Authorization": "Bearer ${env:KAITEN_API_TOKEN}" }
     }
   }
 }
 ```
 
-Alternatively, configure globally at:
-- macOS/Linux: `~/.cursor/mcp.json`
-- Windows: `%USERPROFILE%\.cursor\mcp.json`
+## VS Code (Copilot)
 
-#### Verify Connection
-
-In Cursor's chat, the Kaiten tools should appear. Try:
-> "Show me all licenses in Kaiten"
-
----
-
-### GitHub Copilot
-
-GitHub Copilot's MCP support varies by IDE. Here's the configuration for VS Code with GitHub Copilot.
-
-#### VS Code Configuration
-
-1. Install the **GitHub Copilot** extension
-2. Create or edit `.vscode/mcp.json` in your workspace:
+`.vscode/mcp.json`:
 
 ```json
 {
+  "inputs": [{ "id": "kaiten-token", "type": "promptString", "description": "Kaiten ksh_ token", "password": true }],
   "servers": {
     "kaiten": {
       "type": "http",
-      "url": "http://localhost:3080/mcp",
-      "headers": {
-        "Authorization": "Bearer ksh_YOUR_TOKEN_HERE"
-      }
+      "url": "http://localhost:6100/mcp",
+      "headers": { "Authorization": "Bearer ${input:kaiten-token}" }
     }
   }
 }
 ```
 
-#### Using with Copilot Chat
+## Running the server for a local Kaiten
 
-Once configured, you can use the Kaiten tools in Copilot Chat:
-> "@mcp kaiten: list all entitlements"
+The SaaS stack's gateway (`saas-api`'s `task up`, on port 6100) already routes `/mcp` to a host named `mcp`
+on its network, so the image only has to join it:
 
----
-
-## Environment Variables
-
-If you prefer to use environment variables for the token (useful for CI/CD or shared configurations):
-
-### Claude Desktop
-
-```json
-{
-  "mcpServers": {
-    "kaiten": {
-      "url": "http://localhost:3080/mcp",
-      "transport": "http",
-      "headers": {
-        "Authorization": "Bearer ${KAITEN_API_TOKEN}"
-      }
-    }
-  }
-}
-```
-
-Set the environment variable:
 ```bash
-export KAITEN_API_TOKEN="ksh_your_token_here"
+docker build -t kaiten-mcp .
+docker run -d --name kaiten-saas-mcp --network kaiten-saas_default --network-alias mcp \
+  -e KAITEN_API_BASE_URL=http://envoy:80/api kaiten-mcp
+curl http://localhost:6100/mcp/health
 ```
 
-### Cursor
-
-Cursor supports environment variable interpolation in its MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "kaiten": {
-      "url": "http://localhost:3080/mcp",
-      "transport": "http",
-      "headers": {
-        "Authorization": "Bearer ${env:KAITEN_API_TOKEN}"
-      }
-    }
-  }
-}
-```
-
----
-
-## Available Tools
-
-The tool list is **generated at startup** from the API's OpenAPI spec, so it
-always matches the running API version — don't rely on any hardcoded list; the
-API reference at `/api/docs` is the authoritative catalogue. The spec currently
-covers these categories:
-
-| Category | Covers |
-|---|---|
-| Customers | CRUD, per-customer integrations |
-| Instances | CRUD, entitlement usage metrics, audit trails |
-| Licenses | CRUD, license ↔ entitlement associations |
-| Entitlements & entitlement groups | CRUD, group usage |
-| Feature flags | CRUD, plus OFREP evaluation |
-| Releases, components, deployment zones | CRUD |
-| Connectors | Settings and settings schema |
-| Metadata fields | CRUD, reorder, archive/unarchive, dry-run |
-| Service accounts | CRUD, token management |
-| Organizations | Read |
-
----
+Against any other Kaiten, `docker compose up -d` here runs the server on its own, on `localhost:8000/mcp`,
+pointed at `KAITEN_API_BASE_URL` (by default a gateway on the host's port 6000).
 
 ## Troubleshooting
 
-### "Connection refused" error
+- **401 from `/mcp`** — the gateway refused the credential: it must be `Bearer ksh_...`, active, and not
+  expired.
+- **A tool answers `Kaiten API 403 Auth.MissingScope`** — the token lacks the scope that operation needs;
+  issue one with more.
+- **Every call fails to connect** — `KAITEN_API_BASE_URL` must be the gateway as seen *from the server*
+  (inside Docker, not `localhost`). `GET /health` says whether it answers.
+- **Tools changed but the client shows the old ones** — restart the client; most cache the tool list.
 
-Ensure the Kaiten stack is running:
-```bash
-docker compose ps
-```
+## Security
 
-Check if the MCP server is healthy:
-```bash
-curl http://localhost:3080/mcp/health
-```
-
-### "401 Unauthorized" error
-
-- Verify your PAT token is correct and starts with `ksh_`
-- Ensure the token hasn't expired
-- Check the Authorization header format: `Bearer ksh_...`
-
-### Tools not appearing
-
-1. Restart your AI client (Claude Desktop, Cursor, etc.)
-2. Check the MCP configuration file syntax (valid JSON)
-3. Verify the URL is accessible from your machine
-
-### Debug Mode
-
-To see detailed logs from the MCP server:
-
-```bash
-docker compose logs -f mcp
-```
-
----
-
-## Security Considerations
-
-1. **Never commit tokens**: Add configuration files with tokens to `.gitignore`
-2. **Use environment variables**: For shared or CI/CD environments
-3. **Rotate tokens regularly**: Create new tokens and revoke old ones periodically
-4. **Limit token scope**: Use the minimum required scopes for your use case
-
----
-
-## Architecture
-
-```
-┌──────────────────┐     ┌─────────────────┐
-│   AI Client      │     │      Envoy      │
-│ (Claude/Cursor)  │────▶│   (Validates    │
-│  + ksh_* token   │     │    PAT token)   │
-└──────────────────┘     └────────┬────────┘
-                                  │
-                                  │ /mcp/* (+ Authorization header)
-                                  ▼
-                         ┌─────────────────┐     ┌─────────────────┐
-                         │   MCP Server    │────▶│   Kaiten API    │
-                         │   (FastMCP)     │     │   (Go Server)   │
-                         │                 │     │                 │
-                         │ Forwards auth   │     │                 │
-                         │ header to API   │     │                 │
-                         └─────────────────┘     └─────────────────┘
-```
-
-1. AI client connects to MCP server via Streamable HTTP at `/mcp` with their PAT token
-2. Envoy validates the client's PAT token using its `ext_authz` filter
-3. MCP server captures the `Authorization` header and forwards it to API calls
-4. Each user's permissions are respected - no shared service account
+- The server holds no credential of its own: each request acts as its caller's token, and nothing more.
+- Give an agent the least it needs. A read-only server (`KAITEN_MCP_READ_ONLY=true`) cannot even attempt a
+  write, whatever its token allows.
+- Never commit a client configuration that contains a token; prefer environment variables or a prompt.
