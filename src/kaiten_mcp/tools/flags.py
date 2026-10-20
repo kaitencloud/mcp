@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Feature flags: definition, targeting rules, and evaluation.
 
 Rules are CEL expressions over the evaluation context. Kaiten enriches the

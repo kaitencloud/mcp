@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Machine access (service accounts and their ksh_ tokens) and the audit trail."""
 
 from __future__ import annotations

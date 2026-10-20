@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """The catalog: entitlements (what can be sold) and plans (what is sold).
 
 A plan is a license family; each of its versions is a license carrying grants,

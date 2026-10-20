@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Release orchestration: components, immutable releases, and the zones running them."""
 
 from __future__ import annotations

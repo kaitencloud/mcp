@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Deletion, traced first.
 
 An agent traces before it changes: without confirm, this tool only reports

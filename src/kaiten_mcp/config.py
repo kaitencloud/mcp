@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Process configuration, read once from the environment."""
 
 from __future__ import annotations

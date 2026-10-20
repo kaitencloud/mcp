@@ -69,7 +69,7 @@ It speaks both standard MCP transports:
 KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
 uv run kaiten-mcp http --port 8000
 
-# without a checkout (the repository is private: uv needs git access to it)
+# without a checkout
 uvx --from git+https://github.com/kaitencloud/mcp kaiten-mcp stdio
 
 # with Docker
@@ -100,13 +100,24 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest                  # unit tests: the real SDK over a mocked Kaiten
 ```
 
-`tests/e2e` drives every tool through a real MCP client against a live Kaiten. With the SaaS stack from
-`saas-api` (`task up`, then the Demo Sandbox's seed), and a token with `read:*` and `write:*` on the
-Demo Sandbox:
+`tests/e2e` drives every tool through a real MCP client against a live Kaiten. With
+[Kaiten](https://github.com/kaitencloud/kaiten)'s own stack and its demo dataset (`task quickstart`, which
+seeds the Kaiten Sushi Shop), and a token with `read:*` and `write:*` on that organization:
 
 ```bash
-KAITEN_API_BASE_URL=http://localhost:6100/api KAITEN_API_TOKEN=ksh_... uv run pytest -m e2e
+KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run pytest -m e2e
 ```
 
 It creates everything it needs under a run-unique suffix and deletes it afterwards, except one service
 account (`e2e-mcp`): Kaiten has no way to delete one.
+
+## License
+
+The Kaiten MCP server is open source and licensed under the
+[Apache License, Version 2.0](./LICENSE).
+
+By contributing, you agree to certify your contribution under the
+[Developer Certificate of Origin 1.1](./DCO.md).
+
+The Kaiten name and logos are not licensed under Apache-2.0. See the
+[Kaiten trademark policy](https://github.com/kaitencloud/kaiten/blob/main/TRADEMARKS.md).

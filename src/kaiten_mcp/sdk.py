@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Kaiten, reached through the official SDK.
 
 The MCP server declares no API contract of its own: paths, request bodies,

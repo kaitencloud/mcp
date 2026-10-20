@@ -6,11 +6,9 @@ Two ways to reach the server, and every client below supports at least one:
 | --- | --- | --- |
 | Who runs the server | your client spawns it, on your machine | a deployment, behind Kaiten's gateway |
 | Where the token goes | `KAITEN_API_TOKEN` in the server's environment | an `Authorization: Bearer ksh_...` header on every request |
-| Address | — | `/mcp` on the server itself (`http://localhost:8000/mcp` with this repo's `compose.yml`), or behind a gateway that routes it: the SaaS stack's does, at `http://localhost:6100/mcp` |
+| Address | — | `/mcp` on the server itself: `http://localhost:8000/mcp` with this repo's `compose.yml` |
 
-The SaaS gateway's `/mcp` route only accepts a `ksh_` organization token: a console JWT or a platform
-credential is refused before it reaches the server. Kaiten's OSS gateway (port 6060) has no `/mcp` route;
-run the server next to it and call the server directly.
+Kaiten's gateway (port 6060) has no `/mcp` route: run the server next to it and call the server directly.
 
 ## Getting a token
 
@@ -23,12 +21,12 @@ once. Grant what the agent should be able to do: `read:*` for an agent that only
 
 ```bash
 # remote (Streamable HTTP)
-claude mcp add --transport http kaiten http://localhost:6100/mcp \
+claude mcp add --transport http kaiten http://localhost:8000/mcp \
   --header "Authorization: Bearer ksh_..."
 
 # local (stdio)
 claude mcp add kaiten \
-  -e KAITEN_API_BASE_URL=http://localhost:6100/api -e KAITEN_API_TOKEN=ksh_... \
+  -e KAITEN_API_BASE_URL=http://localhost:6060/api -e KAITEN_API_TOKEN=ksh_... \
   -- uvx --from git+https://github.com/kaitencloud/mcp kaiten-mcp stdio
 ```
 
@@ -44,7 +42,7 @@ starts local servers:
       "command": "uvx",
       "args": ["--from", "git+https://github.com/kaitencloud/mcp", "kaiten-mcp", "stdio"],
       "env": {
-        "KAITEN_API_BASE_URL": "http://localhost:6100/api",
+        "KAITEN_API_BASE_URL": "http://localhost:6060/api",
         "KAITEN_API_TOKEN": "ksh_..."
       }
     }
@@ -64,7 +62,7 @@ With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm",
 {
   "mcpServers": {
     "kaiten": {
-      "url": "http://localhost:6100/mcp",
+      "url": "http://localhost:8000/mcp",
       "headers": { "Authorization": "Bearer ${env:KAITEN_API_TOKEN}" }
     }
   }
@@ -81,7 +79,7 @@ With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm",
   "servers": {
     "kaiten": {
       "type": "http",
-      "url": "http://localhost:6100/mcp",
+      "url": "http://localhost:8000/mcp",
       "headers": { "Authorization": "Bearer ${input:kaiten-token}" }
     }
   }
@@ -90,18 +88,13 @@ With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm",
 
 ## Running the server for a local Kaiten
 
-The SaaS stack's gateway (`saas-api`'s `task up`, on port 6100) already routes `/mcp` to a host named `mcp`
-on its network, so the image only has to join it:
+`docker compose up -d` here runs the server on its own, on `localhost:8000/mcp`, pointed at
+`KAITEN_API_BASE_URL` (by default a gateway on the host's port 6060):
 
 ```bash
-docker build -t kaiten-mcp .
-docker run -d --name kaiten-saas-mcp --network kaiten-saas_default --network-alias mcp \
-  -e KAITEN_API_BASE_URL=http://envoy:80/api kaiten-mcp
-curl http://localhost:6100/mcp/health
+docker compose up -d
+curl http://localhost:8000/health
 ```
-
-Against any other Kaiten, `docker compose up -d` here runs the server on its own, on `localhost:8000/mcp`,
-pointed at `KAITEN_API_BASE_URL` (by default a gateway on the host's port 6060).
 
 ## Troubleshooting
 

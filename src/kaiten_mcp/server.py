@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """The Kaiten MCP server: intent-level tools over Kaiten's API."""
 
 from __future__ import annotations

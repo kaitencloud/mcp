@@ -1,8 +1,7 @@
 # The MCP server on its own, against a Kaiten you already run.
 #
 # KAITEN_API_BASE_URL is Kaiten's gateway as seen from inside this container,
-# so the default assumes a Kaiten stack on the same machine. To sit behind the
-# SaaS stack's own gateway instead, see MCP.md.
+# so the default assumes a Kaiten stack on the same machine.
 services:
   mcp:
     build:

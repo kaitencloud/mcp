@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Orientation: what this organization holds, and finding things in it."""
 
 from __future__ import annotations

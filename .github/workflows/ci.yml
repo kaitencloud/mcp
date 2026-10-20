@@ -10,9 +10,10 @@ on:
 permissions:
   contents: read
 
+# The job names are the checks the default-branch ruleset requires: lint, test and build.
 jobs:
-  check:
-    name: Lint and test
+  lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,15 +30,30 @@ jobs:
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
 
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.1"
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
       # The e2e suite needs a live Kaiten and is deselected by default; these
       # drive every tool's wiring through the real SDK over a mocked API.
       - name: Test
         run: uv run pytest
 
-  image:
-    name: Image
+  build:
+    name: build
     runs-on: ubuntu-latest
-    needs: check
+    needs: [lint, test]
     permissions:
       contents: read
       packages: write
