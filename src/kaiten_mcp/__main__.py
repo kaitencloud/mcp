@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """kaiten-mcp: run the server over stdio (local clients) or Streamable HTTP (remote clients)."""
 
 from __future__ import annotations

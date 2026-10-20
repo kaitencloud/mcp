@@ -14,7 +14,7 @@ WORKDIR /app
 # Dependencies first, so a source change does not reinstall them.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
-COPY README.md ./
+COPY README.md LICENSE NOTICE ./
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 

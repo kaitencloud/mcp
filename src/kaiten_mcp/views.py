@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Composite reads: the views several tools share, assembled from SDK calls.
 
 The questions an agent asks ("how is Acme doing", "who is near their limit")

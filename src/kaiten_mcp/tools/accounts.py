@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Customers and their instances: who bought what, and where it runs."""
 
 from __future__ import annotations

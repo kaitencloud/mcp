@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """The tool catalogue, one module per area of Kaiten.
 
 Every module registers its read tools always, and its write tools only when

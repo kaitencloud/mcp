@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Tools driven through a real MCP client and the real SDK, over a mocked Kaiten."""
 
 import json

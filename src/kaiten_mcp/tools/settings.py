@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """Organization settings: typed metadata fields, and connectors to outside systems."""
 
 from __future__ import annotations

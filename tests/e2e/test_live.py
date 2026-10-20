@@ -1,8 +1,11 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """End to end, against a live Kaiten: every tool, through a real MCP client.
 
-Needs KAITEN_API_BASE_URL (the gateway, e.g. http://localhost:6100/api) and a
+Needs KAITEN_API_BASE_URL (the gateway, e.g. http://localhost:6060/api) and a
 KAITEN_API_TOKEN with read:* and write:* on an organization holding the demo
-dataset (the Kaiten Sushi Shop that `task up` + the demo seed provide). Every
+dataset (the Kaiten Sushi Shop that Kaiten's `task quickstart` seeds). Every
 resource it creates carries a run-unique suffix and is deleted at the end.
 
     uv run pytest -m e2e

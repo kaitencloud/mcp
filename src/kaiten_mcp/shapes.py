@@ -1,3 +1,6 @@
+# Copyright 2026 KAITEN INC
+# SPDX-License-Identifier: Apache-2.0
+
 """How Kaiten resources are shown to an agent, and how its inputs are read.
 
 The SDK's models carry everything a console needs: ids, audit users,
