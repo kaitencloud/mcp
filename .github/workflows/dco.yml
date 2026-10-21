@@ -27,12 +27,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_COMMIT_COUNT: ${{ github.event.pull_request.commits }}
         run: |
           """Fail when a commit of the pull request is not signed off by its author (DCO 1.1)."""
 
           import json
           import os
           import re
+          import subprocess
           import sys
           import urllib.request
 
@@ -52,15 +54,18 @@ jobs:
               """Why a commit, as the API lists a pull request's commits, fails; None if it passes.
 
               A commit passes when one of its Signed-off-by trailers names its author, by name and
-              by email, ignoring case. A merge commit adds no work of its own, and a bot account
-              certifies nothing, so neither is checked.
+              by email, ignoring case. Merge commits can contain conflict resolutions and must be
+              signed off too. A bot account certifies nothing, so it is not checked.
               """
-              if len(commit.get("parents") or []) > 1:
-                  return None
               if (commit.get("author") or {}).get("type") == "Bot":
                   return None
               author = commit["commit"]["author"]
-              signoffs = [(m["name"], m["email"]) for m in SIGN_OFF.finditer(commit["commit"]["message"])]
+              # Parse only the final trailer block, not quoted sign-offs in the message body.
+              trailers = subprocess.run(
+                  ["git", "interpret-trailers", "--parse"],
+                  input=commit["commit"]["message"], text=True, capture_output=True, check=True,
+              ).stdout
+              signoffs = [(m["name"], m["email"]) for m in SIGN_OFF.finditer(trailers)]
               if any(
                   name.lower() == author["name"].lower() and email.lower() == author["email"].lower()
                   for name, email in signoffs
@@ -96,7 +101,15 @@ jobs:
 
 
           def main():
+              # GitHub's pull-request commits endpoint is capped at 250, even with pagination.
+              expected = int(os.environ["PR_COMMIT_COUNT"])
+              if expected > 250:
+                  print("::error title=DCO::Pull requests over 250 commits must be split for DCO verification.")
+                  return 1
               listed = list(commits())
+              if len(listed) != expected:
+                  print("::error title=DCO::Commit count changed or the API returned an incomplete list; rerun the check.")
+                  return 1
               failed = [(commit, why) for commit in listed if (why := problem(commit)) is not None]
               for commit, why in failed:
                   subject = commit["commit"]["message"].splitlines()[0]
