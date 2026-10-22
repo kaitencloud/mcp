@@ -688,7 +688,21 @@ wheels = [
 ]
 
 [[package]]
-name = "kaiten-mcp"
+name = "kaitencloud"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/b2/583b741a4fccbde6e27e5e04567f48ab2d9be22e3ffa2f2d002d0767e033/kaitencloud-1.0.0.tar.gz", hash = "sha256:09ecd8670f6a1a83ea9b6397e34d5192e158a3c9b0c260edaee18953d905563c", size = 190477, upload-time = "2026-09-30T21:34:57.918Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/aa/a4f9b4429a7c27279f990d8ec5723d05fd3f8db5a6accb529496ffe06d2b/kaitencloud-1.0.0-py3-none-any.whl", hash = "sha256:bb59df10fd012fbf9c5b74a2add4f235aa36e2e983b45938e8d85511565beaa4", size = 130225, upload-time = "2026-09-30T21:34:56.58Z" },
+]
+
+[[package]]
+name = "kaitencloud-mcp"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
@@ -718,20 +732,6 @@ dev = [
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.25" },
     { name = "ruff", specifier = ">=0.8" },
-]
-
-[[package]]
-name = "kaitencloud"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/10/b2/583b741a4fccbde6e27e5e04567f48ab2d9be22e3ffa2f2d002d0767e033/kaitencloud-1.0.0.tar.gz", hash = "sha256:09ecd8670f6a1a83ea9b6397e34d5192e158a3c9b0c260edaee18953d905563c", size = 190477, upload-time = "2026-09-30T21:34:57.918Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/aa/a4f9b4429a7c27279f990d8ec5723d05fd3f8db5a6accb529496ffe06d2b/kaitencloud-1.0.0-py3-none-any.whl", hash = "sha256:bb59df10fd012fbf9c5b74a2add4f235aa36e2e983b45938e8d85511565beaa4", size = 130225, upload-time = "2026-09-30T21:34:56.58Z" },
 ]
 
 [[package]]

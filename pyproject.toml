@@ -1,8 +1,9 @@
 [project]
-name = "kaiten-mcp"
+name = "kaitencloud-mcp"
 version = "0.2.0"
 description = "Kaiten MCP server: intent-level tools over the Kaiten API for AI agents"
 readme = "README.md"
+keywords = ["kaiten", "mcp", "model-context-protocol", "ai-agents"]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
@@ -15,6 +16,11 @@ dependencies = [
 
 [project.scripts]
 kaiten-mcp = "kaiten_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://kaiten.sh"
+Repository = "https://github.com/kaitencloud/mcp"
+Issues = "https://github.com/kaitencloud/mcp/issues"
 
 [dependency-groups]
 dev = [
