@@ -1,5 +1,5 @@
 [project]
-name = "kaiten-mcp"
+name = "kaitencloud-mcp"
 version = "0.2.0"
 description = "Kaiten MCP server: intent-level tools over the Kaiten API for AI agents"
 readme = "README.md"
@@ -13,8 +13,18 @@ dependencies = [
     "uvicorn>=0.32.0",
 ]
 
+[project.urls]
+Homepage = "https://kaiten.sh"
+Documentation = "https://docs.kaiten.sh/docs/developer-resources/mcp-server"
+Repository = "https://github.com/kaitencloud/mcp"
+Issues = "https://github.com/kaitencloud/mcp/issues"
+Changelog = "https://github.com/kaitencloud/mcp/blob/main/CHANGELOG.md"
+
+# kaiten-mcp is the command; kaitencloud-mcp is the same one under the package's name, so that
+# `uvx kaitencloud-mcp` runs it. The PyPI name kaiten-mcp belongs to an unrelated project.
 [project.scripts]
 kaiten-mcp = "kaiten_mcp.__main__:main"
+kaitencloud-mcp = "kaiten_mcp.__main__:main"
 
 [dependency-groups]
 dev = [
