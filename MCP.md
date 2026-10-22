@@ -27,7 +27,7 @@ claude mcp add --transport http kaiten http://localhost:8000/mcp \
 # local (stdio)
 claude mcp add kaiten \
   -e KAITEN_API_BASE_URL=http://localhost:6060/api -e KAITEN_API_TOKEN=ksh_... \
-  -- uvx --from git+https://github.com/kaitencloud/mcp kaiten-mcp stdio
+  -- uvx kaitencloud-mcp stdio
 ```
 
 ## Claude Desktop
@@ -40,7 +40,7 @@ starts local servers:
   "mcpServers": {
     "kaiten": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/kaitencloud/mcp", "kaiten-mcp", "stdio"],
+      "args": ["kaitencloud-mcp", "stdio"],
       "env": {
         "KAITEN_API_BASE_URL": "http://localhost:6060/api",
         "KAITEN_API_TOKEN": "ksh_..."
@@ -51,7 +51,7 @@ starts local servers:
 ```
 
 With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm", "-e", "KAITEN_API_BASE_URL",
-"-e", "KAITEN_API_TOKEN", "kaiten-mcp", "stdio"]`, with the same `env`. A remote server is added from
+"-e", "KAITEN_API_TOKEN", "ghcr.io/kaitencloud/kaiten-mcp:0.2", "stdio"]`, with the same `env`. A remote server is added from
 **Settings → Connectors** instead.
 
 ## Cursor

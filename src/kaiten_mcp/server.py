@@ -18,7 +18,7 @@ from .sdk import KaitenErrors
 from .tools import register_all
 
 try:
-    VERSION = version("kaiten-mcp")
+    VERSION = version("kaitencloud-mcp")
 except PackageNotFoundError:  # running from a source tree
     VERSION = "0.0.0"
 
