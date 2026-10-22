@@ -65,7 +65,9 @@ def build(*, writes: bool | None = None) -> FastMCP:
         try:
             async with httpx.AsyncClient(timeout=5.0) as c:
                 r = await c.get(f"{settings.api_base_url}/healthz")
-            api = {"reachable": r.status_code == 200, "status": r.status_code}
+            # A Community Edition gateway serves /healthz to anyone; Kaiten Cloud's asks for a
+            # token and answers 401. Either way, Kaiten answered at that address.
+            api = {"reachable": r.status_code in (200, 401), "status": r.status_code}
         except httpx.HTTPError as e:
             api = {"reachable": False, "error": str(e)}
         return JSONResponse(
