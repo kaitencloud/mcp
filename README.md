@@ -68,18 +68,21 @@ It speaks both standard MCP transports:
   `Authorization: Bearer ksh_...` header, which the server forwards to Kaiten untouched.
 
 ```bash
-# from a checkout, with uv
-KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
-uv run kaiten-mcp http --port 8000
-
-# without a checkout
-uvx --from git+https://github.com/kaitencloud/mcp kaiten-mcp stdio
+# from PyPI, with uv
+KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uvx kaitencloud-mcp stdio
+uvx kaitencloud-mcp http --port 8000
 
 # with Docker
+docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp:0.2 stdio
+docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... ghcr.io/kaitencloud/kaiten-mcp:0.2   # http, the default
+
+# from a checkout
+KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
 docker build -t kaiten-mcp .
-docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... kaiten-mcp stdio
-docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... kaiten-mcp            # http, the default
 ```
+
+The package is [`kaitencloud-mcp`](https://pypi.org/project/kaitencloud-mcp/) and the image
+`ghcr.io/kaitencloud/kaiten-mcp`. `kaiten-mcp` on PyPI is an unrelated project.
 
 [MCP.md](./MCP.md) has the client configurations (Claude Code, Claude Desktop, Cursor, VS Code) and how to
 get a token.

@@ -74,6 +74,26 @@ Please:
 
 Accepted contributions are contributed under Apache-2.0.
 
+## Releasing
+
+Releases are made by maintainers. A merge to `main` publishes the container image
+`ghcr.io/kaitencloud/kaiten-mcp:main`. To release a version, set `version` in
+`pyproject.toml`, merge it, and push the tag:
+
+```bash
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+CI then publishes the image as `:0.3.0` and `:0.3`, and the Python package to PyPI as
+[`kaitencloud-mcp`](https://pypi.org/project/kaitencloud-mcp/). The `publish` job refuses a
+tag that does not match `pyproject.toml`'s version.
+
+PyPI publishing uses trusted publishing, so no token is stored: the project's publisher on
+PyPI must name this repository, the `CI` workflow (`ci.yml`) and the `pypi` environment.
+The image's package is created by the first publish and takes the repository's visibility,
+so the repository must be public before then.
+
 ## Security
 
 Do not report unpatched vulnerabilities in public issues.

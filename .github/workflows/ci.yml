@@ -50,6 +50,12 @@ jobs:
       - name: Test
         run: uv run pytest
 
+  # A pull request builds the image so a broken Dockerfile fails here; main and
+  # tags publish it to GHCR as ghcr.io/kaitencloud/kaiten-mcp. The package is
+  # created by this repository's first publish and linked to it by the image's
+  # source label, so it takes this repository's visibility: publish only once the
+  # repository is public. (`mcp` is a different, older package, linked to
+  # kaiten-internal, that this repository's token cannot write.)
   build:
     name: build
     runs-on: ubuntu-latest
@@ -57,14 +63,18 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/kaiten-mcp
     steps:
       - uses: actions/checkout@v5
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      # Logged in on every run of this repository, pull requests included: the
+      # build cache lives in the registry and is read through this login. A pull
+      # request from a fork gets a read-only token, which still reads the cache.
       - name: Log in to GHCR
-        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -74,14 +84,17 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
             type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha
 
-      # A pull request builds the image, so a broken Dockerfile fails here;
-      # main and tags also publish it.
+      # The cache is a tag of the image's own package, not the GitHub Actions cache:
+      # that one is read-only on re-runs of an old pull request, and failed this
+      # job's build with "failed to reserve cache". Only main and tags write it.
       - name: Build
         uses: docker/build-push-action@v6
         with:
@@ -90,5 +103,40 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}:buildcache,mode=max', env.IMAGE) || '' }}
+
+  # A `v*` tag publishes the Python package to PyPI as kaitencloud-mcp, once lint,
+  # test and the image build have passed on it. Trusted publishing: no token is
+  # stored; PyPI trusts this workflow, in the `pypi` environment, to publish the
+  # project (see CONTRIBUTING.md, "Releasing").
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.9.1"
+
+      - name: The tag is the project's version
+        run: |
+          version=$(uv version --short)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject.toml's version $version"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1

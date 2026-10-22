@@ -1,8 +1,8 @@
 # Kaiten MCP server.
 #
-#   docker run -p 8000:8000 -e KAITEN_API_BASE_URL=https://kaiten.example.com/api ghcr.io/kaitencloud/mcp
+#   docker run -p 8000:8000 -e KAITEN_API_BASE_URL=https://kaiten.example.com/api ghcr.io/kaitencloud/kaiten-mcp
 #       Streamable HTTP at /mcp; each request authenticates with its own bearer token.
-#   docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/mcp stdio
+#   docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp stdio
 #       stdio, for a local client that spawns the server.
 
 ARG PYTHON_BASE=3.13-slim
