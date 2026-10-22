@@ -14,13 +14,17 @@ dependencies = [
     "uvicorn>=0.32.0",
 ]
 
+# kaitencloud-mcp is the same command under the package's name, so that `uvx kaitencloud-mcp` runs it.
 [project.scripts]
 kaiten-mcp = "kaiten_mcp.__main__:main"
+kaitencloud-mcp = "kaiten_mcp.__main__:main"
 
 [project.urls]
 Homepage = "https://kaiten.sh"
 Repository = "https://github.com/kaitencloud/mcp"
 Issues = "https://github.com/kaitencloud/mcp/issues"
+Documentation = "https://docs.kaiten.sh/docs/developer-resources/mcp-server"
+Changelog = "https://github.com/kaitencloud/mcp/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
