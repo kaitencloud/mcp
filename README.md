@@ -1,14 +1,15 @@
 # Kaiten MCP Server
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent (Claude, Cursor, Copilot, any MCP
-client) run Kaiten: onboard customers, provision instances, shape plans and entitlements, meter usage,
+client) run Kaiten: onboard customers, provision instances, shape Licenses and entitlements, meter usage,
 target feature flags and ship releases — in Kaiten's own vocabulary, not in HTTP verbs.
 
 ```text
 "Which customers are close to a limit?"            → kaiten_get_usage(min_percent=80)
-"Put Acme on Premium and renew them for a year"    → kaiten_update_instance(plan="premium", extend_license_days=365)
-"Give Growth 20 more seats, without touching       → kaiten_save_license(new_version_of="growth",
- existing customers"                                   grants={"seats": 70})
+"Move Ninja Osaka to Premium and renew it for a    → kaiten_update_instance(instance="ninja-osaka-prod",
+ year"                                                 plan="premium", extend_license_days=365)
+"Give Starter 20 more menu items, without          → kaiten_save_license(new_version_of="starter",
+ touching existing customers"                          grants={"menu-items": 25})
 "Why doesn't Sakura see the analytics dashboard?"  → kaiten_evaluate_flags(instance="sakura-tokyo-prod")
 ```
 
@@ -18,8 +19,8 @@ The previous server turned every OpenAPI operation into a tool: 105 tools, one p
 the agent for UUIDs and full replacement bodies. This one exposes **31 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
-- **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a plan to its current
-  license version, finds the zone, creates the customer if asked and sets the license term; the agent never
+- **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
+  current version, finds the zone, creates the customer if asked and sets the license term; the agent never
   handles an id. `kaiten_get_customer` answers "how is this customer doing" in one call.
 - **Reads return slices, never the whole catalog.** Resources are projected onto the fields that carry
   meaning, named by slug, with usage already set against its limit (`used`, `limit`, `percent`, `state`).
@@ -47,7 +48,7 @@ MCP by bumping the SDK.
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` | `kaiten_report_usage` |
-| Catalog & plans | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
+| Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
 | Access & audit | `kaiten_get_access` · `kaiten_get_audit_trail` | `kaiten_issue_token` · `kaiten_revoke_token` |
@@ -55,6 +56,8 @@ MCP by bumping the SDK.
 | Deletion | | `kaiten_delete` (previews unless `confirm=true`) |
 
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
+In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
+`license` an exact License version.
 
 ## Running it
 
