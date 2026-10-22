@@ -165,7 +165,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         ],
         name: Annotated[str | None, Field(description="Display name (required to create)")] = None,
         domain: Annotated[
-            str | None, Field(description="The customer's domain, e.g. acme.com")
+            str | None, Field(description="The customer's domain, e.g. sakura-tokyo.example")
         ] = None,
         external_customer_id: Annotated[
             str | None,
@@ -207,7 +207,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
     @mcp.tool(annotations=WRITE)
     async def kaiten_provision_instance(
         customer: Annotated[str, Field(description="Slug of the customer the instance belongs to")],
-        name: Annotated[str, Field(description="Instance display name, e.g. 'Acme Production'")],
+        name: Annotated[
+            str, Field(description="Instance display name, e.g. 'Sakura Tokyo Production'")
+        ],
         plan: Annotated[
             str | None,
             Field(

@@ -3,7 +3,7 @@
 
 """Composite reads: the views several tools share, assembled from SDK calls.
 
-The questions an agent asks ("how is Acme doing", "who is near their limit")
+The questions an agent asks ("how is Sakura Tokyo doing", "who is near their limit")
 span a customer, its instances, their license grants and their usage. Each is
 one SDK call; a view fetches them concurrently, fetches each license's grants
 once however many instances share it, and only fetches usage when asked.
