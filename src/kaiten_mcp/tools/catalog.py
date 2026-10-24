@@ -32,7 +32,7 @@ GrantSpec = Annotated[
     dict[str, Any] | None,
     Field(
         description=(
-            "Grants by entitlement slug. A value is a number (NUMBER: -1 or 'unlimited' for no cap), true/false "
+            "Grants by entitlement slug. A value is a number (NUMBER or NUMBER_AI_CREDIT: -1 or 'unlimited' for no cap), true/false "
             "(BOOLEAN), or an object (CONFIG); or {'value': v, 'overage_percent': p} where p=0 is a hard limit and "
             "p>0 lets usage run p% past the value. null removes the grant."
         )
@@ -242,6 +242,10 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             }
         )
         cur = await sdk.get_or_none(k.entitlements.get(eslug))
+        effective_type = type or (cur.type if cur else None)
+        effective_aggregation = aggregation or (cur.aggregation_method if cur else None) or "SUM"
+        if effective_type == "NUMBER_AI_CREDIT" and effective_aggregation != "SUM":
+            raise ToolError("NUMBER_AI_CREDIT entitlements require SUM aggregation.")
         status = "updated"
         if cur is None:
             if not name or not type:
