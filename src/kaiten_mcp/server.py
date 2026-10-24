@@ -46,7 +46,10 @@ How to work:
   license version, and kaiten_delete without confirm previews what a deletion touches.
 - Prefer a new license version (kaiten_save_license new_version_of=...) to editing a published version
   in place: editing changes every instance on it immediately.
-- Usage reports are not idempotent; never repeat one that answered.
+- Numeric usage reports are not idempotent here; never repeat one that answered. AI reserve/commit uses
+  kaiten_report_ai_usage with the same transaction_id and identical phase/body for safe retries (no Idempotency-Key).
+- AI models are organization-owned identities, not provider integrations. Conversion rules belong to exact
+  license versions; a new version's copied numeric grants do not copy AI rules. Inspect/configure them explicitly.
 """
 
 

@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **31 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **37 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -38,8 +38,8 @@ rules in Kaiten's product vision for agent-readiness:
 There is no API contract in this repository. Every call goes through the official
 [Python SDK](https://github.com/kaitencloud/sdk-python) (`kaitencloud`), generated from Kaiten's OpenAPI
 document: its methods, its models, its enums (which become the tools' input schemas), its enforcement
-arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). A new API field reaches the
-MCP by bumping the SDK.
+arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). AI control-plane endpoints not yet wrapped by the installed SDK use its authenticated transport,
+like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract without editing generated code.
 
 ## Tools
 
@@ -48,6 +48,7 @@ MCP by bumping the SDK.
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` | `kaiten_report_usage` |
+| AI credits | `kaiten_get_ai_models` · `kaiten_get_ai_rules` · `kaiten_get_ai_history` | `kaiten_save_ai_model` · `kaiten_save_ai_rule` · `kaiten_report_ai_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
@@ -58,6 +59,49 @@ MCP by bumping the SDK.
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
 In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
 `license` an exact License version.
+
+## AI credit control plane
+
+Models are identities owned by your organization, with exact provider aliases and optional USD vendor
+costs — not a synchronized provider catalogue, credential store, or inference runtime. Model costs use
+string decimals (6 integer digits, 12 decimal places); conversion rates use 8 digits and 10 places;
+credit caps and usage `units` use 12 digits and 6 places. Floats and exponent notation are refused.
+
+- Define a `NUMBER_AI_CREDIT` entitlement with `kaiten_save_entitlement`. It must aggregate by `SUM`;
+  its licence grant and read usage remain ordinary numeric credits. `kaiten_report_usage` accepts only
+  `append` for AI credit adjustments/refunds, never `set`.
+- Grant credits with `kaiten_save_license`, then configure rules with `kaiten_save_ai_rule` on an **exact
+  licence version slug**, such as `premium-v2`. A rule selects an entitlement, an optional model and an
+  optional request type (omitting selectors on creation means wildcard). Inspect `kaiten_get_ai_rules`
+  and use its rule id to edit; an identical edit writes nothing. Creation is not retry-safe: inspect
+  the rules after an uncertain create before trying again. `rates` replaces the rate map; omitted
+  selectors, caps and error policy are preserved on edit. Explicit selector/cap clearing and rule
+  archival are not exposed by these bounded intents.
+- Editing rules changes the instances on that version immediately. Prefer a new version and configure
+  its rules explicitly: `kaiten_save_license(new_version_of=...)` copies grants, **not AI rules**.
+  Model and rule reads are available on read-only servers; authoring and reports are not.
+- `kaiten_report_ai_usage(phase="reserve", ...)` holds estimated credits before your application sends
+  a provider request. Supply a model identity or exact alias, request type and quantities. Commit the
+  actual quantities with `phase="commit"` and `request_status` (`SUCCESS`, `PROVIDER_ERROR`,
+  `CUSTOMER_ERROR`, or `NOT_SENT` to release an unsent request). Commit can omit model/request type to
+  inherit a reservation. `usage={}` is allowed; `units` and `unitType` must be supplied together.
+- Use the same `transaction_id` for reserve and commit, scoped to instance + entitlement. It is 1–128
+  exact characters from `[A-Za-z0-9._:-]`; retry only the identical phase/body. The tool never sends
+  `Idempotency-Key`. A changed retry is a conflict, not a new charge. Reservation TTL is validated
+  against the deployment's configured maximum by Kaiten; commits refuse TTL. Reservations do not lock
+  rates, and commits account actual usage even beyond limits. Inspect the returned `usage.ai` status,
+  authorization, warnings, exact credits and remaining balance — a recorded commit is not authorization
+  to run inference.
+- `kaiten_get_ai_history` returns one bounded inference page with the API cursor, or open reservations
+  with `open_reservations=true`. It preserves transaction identities and exact credit strings. Normal
+  API denial/conflict codes reach the agent unchanged. No tool calls an AI provider.
+
+Example rule input: `license="premium-v2", entitlement="ai-credits", model="assistant",
+request_type="COMPLETION", rates={"perInputToken": "0.000001", "perOutputToken": "0.000002"}`.
+AI `usage` accepts `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`,
+`durationMs` (non-negative int64 integers), and `units`/`unitType` (`image`, `second`, `frame`).
+Rates additionally accept `perCachedInputToken`, `perCacheWriteToken`, `perRequest`, `perSecond` and
+`perUnit`; vendor costs accept those except `perSecond`.
 
 ## Running it
 
