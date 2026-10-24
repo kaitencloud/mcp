@@ -98,7 +98,7 @@ async def test_read_only_mode_registers_no_write_tool():
 async def test_every_tool_declares_its_effect():
     async with Client(build(writes=True)) as c:
         tools = await c.list_tools()
-    assert len(tools) == 31
+    assert len(tools) == 37
     for t in tools:
         assert t.annotations.read_only_hint is not None, t.name
         assert t.description, t.name

@@ -76,16 +76,21 @@ async def require(call: Any, what: str) -> Any:
 
 
 # The SDK wraps every operation an application calls; the targeting authoring
-# endpoints and OFREP evaluation are left to the console and to OpenFeature.
+# endpoints, AI control-plane endpoints and OFREP evaluation need a transport fallback.
 # These go through the SDK's own transport (credential, retries, typed errors)
 # and decode to plain JSON, until sdk-python grows methods for them.
 
 
 async def call_unwrapped(
-    method: str, path: str, body: Any = None, *, idempotent: bool | None = None
+    method: str,
+    path: str,
+    body: Any = None,
+    *,
+    idempotent: bool | None = None,
+    params: dict[str, Any] | None = None,
 ) -> Any:
     api = kaiten()._api
-    response = await api.request(method, path, body=body, idempotent=idempotent)
+    response = await api.request(method, path, body=body, idempotent=idempotent, params=params)
     return api.decode(response)
 
 

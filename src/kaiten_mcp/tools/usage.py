@@ -109,6 +109,10 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             raise ToolError(
                 f"{eslug} is a {grant.entitlement_type} entitlement: only NUMBER and NUMBER_AI_CREDIT are metered."
             )
+        if grant.entitlement_type == "NUMBER_AI_CREDIT" and behavior != "append":
+            raise ToolError(
+                "AI credit adjustments accept only append; use kaiten_report_ai_usage for model quantities."
+            )
         limit = shapes.plain(grant.value)
         pct = grant.limit_cap_exceeded_overage_percent
         definition = snap.entitlements.get(eslug)
