@@ -8,9 +8,13 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = [
+    # Security floors for transitive TLS/JWT dependencies also protect unlocked installs.
+    "anyio>=4.14.2",
+    "certifi>=2026.10.19",
     "fastmcp>=4.1.0,<5",
     "httpx>=0.28.0",
     "kaitencloud>=1.0.0",
+    "pyjwt>=2.15.0",
     "uvicorn>=0.32.0",
 ]
 
