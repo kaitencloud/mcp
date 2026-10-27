@@ -34,8 +34,16 @@ DESTRUCTIVE = {
 }
 
 
-def register_all(mcp: FastMCP, *, writes: bool) -> None:
+def register_all(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     from . import access, accounts, catalog, delete, flags, overview, releases, settings, usage
 
+    ai_enabled = ai_enabled is True
     for module in (overview, accounts, usage, catalog, flags, releases, access, settings, delete):
-        module.register(mcp, writes=writes)
+        if module in (overview, accounts, usage, catalog, flags, delete):
+            module.register(mcp, writes=writes, ai_enabled=ai_enabled)
+        else:
+            module.register(mcp, writes=writes)
+    if ai_enabled:
+        from . import ai
+
+        ai.register(mcp, writes=writes)

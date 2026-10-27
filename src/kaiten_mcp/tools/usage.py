@@ -13,13 +13,13 @@ from kaitencloud import ThresholdExceededError
 from kaitencloud.types import UsageBehavior
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import APPEND, READ
 
 State = Literal["ok", "warning", "at_limit", "overage", "over", "unlimited"]
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_get_usage(
         entitlement: Annotated[
@@ -37,14 +37,23 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         ] = None,
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
     ) -> dict:
-        """Usage of metered (NUMBER and AI credit) entitlements across instances, highest percentage first: who is
+        """Usage of metered NUMBER entitlements across instances, highest percentage first: who is
         close to a limit, who is in overage, how much of a quota a customer has left. States: ok, warning (past the
         entitlement's warning threshold), at_limit, overage (past the included value but within the grant's
         overage allowance), over, unlimited."""
         k = sdk.kaiten()
         snap = await views.snapshot(
-            await k.instances.list(), keep=lambda i: not customer or i.customer_slug == customer
+            await k.instances.list(),
+            keep=lambda i: not customer or i.customer_slug == customer,
+            ai_enabled=ai_enabled,
         )
+        if entitlement:
+            eslug = shapes.slug(entitlement, "entitlement")
+            ai_policy.require_available(snap.entitlements.get(eslug), enabled=ai_enabled)
+            for grants in snap.grants.values():
+                for grant in grants:
+                    if grant.entitlement_slug == eslug:
+                        ai_policy.require_available(grant, enabled=ai_enabled)
         rows = []
         for i in snap.instances:
             if plan and snap.plan_of(i) != plan:
@@ -77,9 +86,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
     @mcp.tool(annotations=APPEND)
     async def kaiten_report_usage(
         instance: Annotated[str, Field(description="Instance slug")],
-        entitlement: Annotated[
-            str, Field(description="Metered entitlement slug (NUMBER or NUMBER_AI_CREDIT)")
-        ],
+        entitlement: Annotated[str, Field(description="Metered entitlement slug")],
         amount: Annotated[float, Field(description="Quantity to report")],
         behavior: Annotated[
             UsageBehavior,
@@ -97,7 +104,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         k = sdk.kaiten()
         inst = await views.instance(instance)
         eslug = shapes.slug(entitlement, "entitlement")
-        snap = await views.snapshot([inst])
+        snap = await views.snapshot([inst], ai_enabled=ai_enabled)
         grant = next(
             (g for g in snap.grants.get(inst.license_slug, []) if g.entitlement_slug == eslug), None
         )
@@ -105,9 +112,16 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             raise ToolError(
                 f"License {inst.license_slug} of instance {inst.slug} does not grant {eslug!r}; nothing to report against."
             )
+        ai_policy.require_available(
+            grant, enabled=ai_enabled, definition=snap.entitlements.get(eslug)
+        )
         if grant.entitlement_type not in shapes.METERED:
             raise ToolError(
                 f"{eslug} is a {grant.entitlement_type} entitlement: only NUMBER and NUMBER_AI_CREDIT are metered."
+            )
+        if ai_policy.is_ai(grant, snap.entitlements.get(eslug)) and behavior != "append":
+            raise ToolError(
+                "AI credit adjustments accept only append; use kaiten_report_ai_usage for model quantities."
             )
         limit = shapes.plain(grant.value)
         pct = grant.limit_cap_exceeded_overage_percent

@@ -32,7 +32,7 @@ The model, top down:
   (start/end), an operational status and a commercial lifecycle stage.
 - Plan = license family (e.g. 'premium'). Its versions are Licenses (e.g. 'premium-v3'), each DRAFT,
   PUBLISHED or ARCHIVED. A plan serves its default version, else its highest published one.
-- A License grants Entitlements: BOOLEAN features, NUMBER quotas (and AI credits) metered by usage
+- A License grants Entitlements: BOOLEAN features, NUMBER quotas metered by usage
   reports, and CONFIG values. A NUMBER grant is unlimited (-1), a hard limit, or soft with an overage %.
 - Feature flags are evaluated through OpenFeature, with CEL targeting rules reading the customer's
   license and entitlements, and the instance, customer and zone (under __kaiten).
@@ -50,15 +50,26 @@ How to work:
 """
 
 
-def build(*, writes: bool | None = None) -> FastMCP:
+AI_INSTRUCTIONS = """\
+AI tools require an explicit local opt-in, not authorization: the server's AIUsage.Disabled denial is authoritative.
+AI reserve/commit uses the same transaction_id and identical phase/body for retries, without Idempotency-Key.
+Models are organization-owned identities, not provider integrations. Conversion rules belong to exact license
+versions; copied numeric grants do not copy rules. Inspect/configure them explicitly.
+"""
+
+
+def build(*, writes: bool | None = None, ai_enabled: bool | None = None) -> FastMCP:
+    enabled = (settings.enable_ai if ai_enabled is None else ai_enabled) is True
     mcp = FastMCP(
         "Kaiten",
-        instructions=INSTRUCTIONS,
+        instructions=INSTRUCTIONS + (AI_INSTRUCTIONS if enabled else ""),
         version=VERSION,
         website_url="https://kaiten.sh",
         middleware=[KaitenErrors()],
     )
-    register_all(mcp, writes=not settings.read_only if writes is None else writes)
+    register_all(
+        mcp, writes=not settings.read_only if writes is None else writes, ai_enabled=enabled
+    )
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_: Request) -> JSONResponse:

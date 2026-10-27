@@ -75,3 +75,92 @@ async def test_shared_sdk_reads_each_callers_credential(monkeypatch):
             )
             await client._api.request("GET", "/healthz")
     assert seen == ["Bearer ksh_first", "Bearer ksh_second"]
+
+
+@pytest.mark.parametrize("ai_enabled", [False, True])
+async def test_real_http_context_isolates_concurrent_credentials_and_preserves_fallback(
+    monkeypatch, ai_enabled
+):
+    import asyncio
+
+    from fastmcp.utilities.tests import asgi_server
+    from test_tools import CUSTOMER
+
+    from kaiten_mcp.server import build
+
+    monkeypatch.setattr(sdk, "settings", replace(sdk.settings, api_token="ksh_process"))
+    seen = []
+
+    def record(req):
+        seen.append(req.headers["authorization"])
+        return httpx.Response(200, json=CUSTOMER)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(record)) as upstream:
+        sdk.use(
+            AsyncKaitenClient(
+                token=sdk.caller_token,
+                base_url="http://kaiten.test",
+                http_client=upstream,
+                max_retries=0,
+            )
+        )
+        try:
+            async with asgi_server(
+                build(writes=True, ai_enabled=ai_enabled), stateless_http=True
+            ) as server:
+
+                async def save(headers):
+                    # Exercise the real HTTP middleware/request context; never replace
+                    # get_http_request or the SDK's caller_token callback here.
+                    async with server.client(headers=headers) as client:
+                        return await client.call_tool(
+                            "kaiten_save_customer",
+                            {"customer": "acme", "name": "Acme", "domain": "acme.com"},
+                            raise_on_error=False,
+                        )
+
+                results = await asyncio.gather(
+                    save({"Authorization": "Bearer ksh_first"}),
+                    save({"Authorization": "Bearer ksh_second"}),
+                )
+                assert all(not r.is_error for r in results)
+                assert not (await save({})).is_error
+                assert (await save({"Authorization": "Bearer "})).is_error
+        finally:
+            sdk.use(None)
+    assert sorted(seen) == ["Bearer ksh_first", "Bearer ksh_process", "Bearer ksh_second"]
+
+
+async def test_real_http_denial_does_not_retry_with_the_process_token(monkeypatch):
+    from fastmcp.utilities.tests import asgi_server
+
+    from kaiten_mcp.server import build
+
+    monkeypatch.setattr(sdk, "settings", replace(sdk.settings, api_token="ksh_process"))
+    seen = []
+
+    def record(req):
+        seen.append(req.headers["authorization"])
+        return httpx.Response(
+            403, json={"status": 403, "code": "AIUsage.Disabled", "detail": "disabled"}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(record)) as upstream:
+        sdk.use(
+            AsyncKaitenClient(
+                token=sdk.caller_token,
+                base_url="http://kaiten.test",
+                http_client=upstream,
+                max_retries=0,
+            )
+        )
+        try:
+            async with (
+                asgi_server(build(ai_enabled=True), stateless_http=True) as server,
+                server.client(headers={"Authorization": "Bearer ksh_caller"}) as client,
+            ):
+                result = await client.call_tool("kaiten_get_ai_models", {}, raise_on_error=False)
+                assert result.is_error and "AIUsage.Disabled" in result.content[0].text
+        finally:
+            sdk.use(None)
+    assert seen == ["Bearer ksh_caller"]

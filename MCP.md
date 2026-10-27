@@ -111,7 +111,11 @@ curl http://localhost:8000/health
 
 ## Security
 
-- The server holds no credential of its own: each request acts as its caller's token, and nothing more.
+- A supplied credential is forwarded as the caller's token. In a shared HTTP deployment, leave
+  `KAITEN_API_TOKEN` unset: otherwise a request without Authorization uses that process fallback.
+- AI-credit tools are absent by default. Only process startup `KAITEN_MCP_ENABLE_AI=true` opts in locally;
+  it cannot bypass the API's authorization or `403 AIUsage.Disabled` deployment policy. Read-only mode
+  still excludes all writes. See README's experimental AI section before enabling.
 - Give an agent the least it needs. A read-only server (`KAITEN_MCP_READ_ONLY=true`) cannot even attempt a
   write, whatever its token allows.
 - Never commit a client configuration that contains a token; prefer environment variables or a prompt.

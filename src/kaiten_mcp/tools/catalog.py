@@ -25,7 +25,7 @@ from kaitencloud.types import (
 )
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import READ, WRITE
 
 GrantSpec = Annotated[
@@ -47,6 +47,8 @@ def _parse_grant(spec: Any) -> tuple[Any, int | None]:
         value, overage = shapes.grant_value(spec), None
     if isinstance(value, int | float) and not isinstance(value, bool) and value == shapes.UNLIMITED:
         overage = shapes.UNLIMITED
+    elif overage is not None and (type(overage) is not int or overage < 0):
+        raise ToolError("overage_percent must be a non-negative integer.")
     return value, overage
 
 
@@ -66,27 +68,52 @@ def _check_type(ent: Any, value: Any) -> None:
         raise ToolError(f"{ent.slug} is a {kind} entitlement: its value must be {expected}.")
 
 
-async def _apply_grants(
-    license_slug: str, grants: dict[str, Any], existing: dict[str, Any]
-) -> dict[str, dict]:
-    """Bring a license's grants to what was asked; returns the per-entitlement changes."""
-    k = sdk.kaiten()
-    catalog = {e.slug: e for e in await k.entitlements.list()}
-    diff: dict[str, dict] = {}
-    for ent_slug, spec in grants.items():
-        ent_slug = shapes.slug(ent_slug, "entitlement")
-        if ent_slug not in catalog:
+async def _prepare_grants(
+    grants: dict[str, Any], existing: dict[str, Any], *, ai_enabled: bool, creating: bool = False
+) -> dict[str, tuple[Any, int | None] | None]:
+    """Validate the entire patch before a license or any grant is written.
+
+    Keep canonical grants separate from visible projections: omitted grants are
+    unchanged, including relations hidden from operational discovery.
+    """
+    if not grants:
+        return {}
+    catalog = {e.slug: e for e in await sdk.kaiten().entitlements.list()}
+    prepared = {}
+    for raw_slug, spec in grants.items():
+        ent_slug = shapes.slug(raw_slug, "entitlement")
+        definition = catalog.get(ent_slug)
+        cur = existing.get(ent_slug)
+        ai_policy.require_available(cur, enabled=ai_enabled, definition=definition)
+        if definition is None:
+            if creating and spec is None and cur is None:
+                continue  # Creation has nothing to remove; preserve the ordinary null no-op.
             raise ToolError(
                 f"No entitlement {ent_slug!r}. Create it with kaiten_save_entitlement first."
             )
+        if spec is None:
+            prepared[ent_slug] = None
+        else:
+            value, overage = _parse_grant(spec)
+            _check_type(definition, value)
+            prepared[ent_slug] = (value, overage)
+    return prepared
+
+
+async def _apply_grants(
+    license_slug: str, prepared: dict[str, tuple[Any, int | None] | None], existing: dict[str, Any]
+) -> dict[str, dict]:
+    """Apply an already validated patch without deriving writes from a filtered view."""
+    k = sdk.kaiten()
+    diff: dict[str, dict] = {}
+    for ent_slug, spec in prepared.items():
         cur = existing.get(ent_slug)
         if spec is None:
             if cur is not None:
                 await k.licenses.delete_entitlement(license_slug, ent_slug)
                 diff[ent_slug] = {"from": shapes.grant(cur), "to": None}
             continue
-        value, overage = _parse_grant(spec)
-        _check_type(catalog[ent_slug], value)
+        value, overage = spec
         if cur is None:
             await k.licenses.associate_entitlement(
                 license_slug, ent_slug, value, overage_percent=overage
@@ -114,10 +141,25 @@ async def _grants_of(license_slug: str) -> dict[str, Any]:
 
 
 async def _version_view(
-    lic: Any, instances: list[Any], *, list_instances: bool, plan: str | None
+    lic: Any,
+    instances: list[Any],
+    *,
+    list_instances: bool,
+    plan: str | None,
+    ai_enabled: bool = False,
+    definitions: dict[str, Any] | None = None,
 ) -> dict:
     out = shapes.license_(lic, plan)
-    out["grants"] = [shapes.grant(g) for g in (await _grants_of(lic.slug)).values()]
+    # LicenseEntitlement.entitlementType is the original catalogue discriminator;
+    # even older SDKs retain unknown string values. Do not require a new catalogue
+    # read permission merely to render a license view (including after a write).
+    out["grants"] = [
+        shapes.grant(g)
+        for g in (await _grants_of(lic.slug)).values()
+        if ai_policy.visible(
+            g, enabled=ai_enabled, definition=(definitions or {}).get(g.entitlement_slug)
+        )
+    ]
     on_it = [i.slug for i in instances if i.license_slug == lic.slug]
     if list_instances:
         out["instances"] = on_it
@@ -126,7 +168,7 @@ async def _version_view(
     return out
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_get_catalog(
         plan: Annotated[
@@ -151,21 +193,33 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 "plan": fam.slug,
                 "current_version": fam.current_version.slug if fam.current_version else None,
                 "versions": await views.gather_bounded(
-                    _version_view(v, instances, list_instances=True, plan=fam.slug)
+                    _version_view(
+                        v, instances, list_instances=True, plan=fam.slug, ai_enabled=ai_enabled
+                    )
                     for v in versions
                 ),
             }
         ents, groups, families = await asyncio.gather(
             k.entitlements.list(), k.entitlement_groups.list(), k.license_families.list()
         )
+        definitions = {e.slug: e for e in ents}
         served = [f for f in families if f.current_version]
         current = await views.gather_bounded(
-            _version_view(f.current_version, instances, list_instances=False, plan=f.slug)
+            _version_view(
+                f.current_version,
+                instances,
+                list_instances=False,
+                plan=f.slug,
+                ai_enabled=ai_enabled,
+                definitions=definitions,
+            )
             for f in served
         )
         by_family = {f.slug: {**v, "plan": f.slug} for f, v in zip(served, current, strict=True)}
         return {
-            "entitlements": [shapes.entitlement(e) for e in ents],
+            "entitlements": [
+                shapes.entitlement(e) for e in ents if ai_policy.visible(e, enabled=ai_enabled)
+            ],
             "entitlement_groups": [{"slug": g.slug, "name": g.name} for g in groups],
             "plans": [
                 shapes.drop_none(
@@ -178,7 +232,6 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
     if not writes:
         return
 
-    @mcp.tool(annotations=WRITE)
     async def kaiten_save_entitlement(
         entitlement: Annotated[
             str, Field(description="Entitlement slug. Created when it does not exist yet")
@@ -241,7 +294,14 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 "icon": icon,
             }
         )
+        if type == "NUMBER_AI_CREDIT" and not ai_enabled:
+            raise ToolError("This entitlement type is not available in this MCP deployment.")
         cur = await sdk.get_or_none(k.entitlements.get(eslug))
+        ai_policy.require_available(cur, enabled=ai_enabled)
+        effective_type = type or (cur.type if cur else None)
+        effective_aggregation = aggregation or (cur.aggregation_method if cur else None) or "SUM"
+        if effective_type == "NUMBER_AI_CREDIT" and effective_aggregation != "SUM":
+            raise ToolError("NUMBER_AI_CREDIT entitlements require SUM aggregation.")
         status = "updated"
         if cur is None:
             if not name or not type:
@@ -294,6 +354,14 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             changes=diff,
         )
 
+    # Project only this tool's write discriminator; do not mutate the SDK's enum.
+    if not ai_enabled:
+        kaiten_save_entitlement.__annotations__["type"] = Annotated[
+            Literal["BOOLEAN", "NUMBER", "CONFIG"] | None,
+            Field(description="BOOLEAN feature, NUMBER quota, or CONFIG value. Set at creation"),
+        ]
+    mcp.tool(annotations=WRITE)(kaiten_save_entitlement)
+
     @mcp.tool(annotations=WRITE)
     async def kaiten_save_license(
         license: Annotated[
@@ -345,6 +413,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         if license:
             lslug = shapes.slug(license, "license")
             cur = await sdk.require(k.licenses.get(lslug), f"license {lslug!r}")
+            existing_grants = await _grants_of(lslug)
+            prepared = await _prepare_grants(grants or {}, existing_grants, ai_enabled=ai_enabled)
             wanted = {
                 "name": cur.name if name is None else name,
                 "description": cur.description if description is None else description,
@@ -358,7 +428,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 "version_name": cur.version_name,
             }:
                 await k.licenses.update(lslug, is_default=cur.is_default, **wanted)
-            grant_diff = await _apply_grants(lslug, grants or {}, await _grants_of(lslug))
+            grant_diff = await _apply_grants(lslug, prepared, existing_grants)
             after = await k.licenses.get(lslug)
             plan = (await views.plan_slugs()).get(after.family_id)
             diff: dict[str, Any] = shapes.changes(
@@ -388,6 +458,26 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             base = fam.current_version or max(
                 fam.versions or [], key=lambda v: int(v.version), default=None
             )
+            start: dict[str, Any] = {}
+            if copy_grants and base:
+                source_grants = await _grants_of(base.slug)
+                source_definitions = {e.slug: e for e in await k.entitlements.list()}
+                for g in source_grants.values():
+                    ai_policy.require_available(
+                        g, enabled=ai_enabled, definition=source_definitions.get(g.entitlement_slug)
+                    )
+                    start[g.entitlement_slug] = (
+                        {
+                            "value": shapes.plain(g.value),
+                            "overage_percent": g.limit_cap_exceeded_overage_percent,
+                        }
+                        if g.limit_cap_exceeded_overage_percent is not None
+                        else shapes.plain(g.value)
+                    )
+                notes.append(f"grants copied from {base.slug}")
+            prepared = await _prepare_grants(
+                {**start, **(grants or {})}, {}, ai_enabled=ai_enabled, creating=True
+            )
             created = await k.licenses.create(
                 family_slug=fam.slug,
                 name=name or (base.name if base else fam.slug),
@@ -398,23 +488,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 version_name=version_name,
                 lifecycle_state="DRAFT" if draft else None,
             )
-            start: dict[str, Any] = {}
-            if copy_grants and base:
-                for g in (await _grants_of(base.slug)).values():
-                    start[g.entitlement_slug] = (
-                        {
-                            "value": shapes.plain(g.value),
-                            "overage_percent": g.limit_cap_exceeded_overage_percent,
-                        }
-                        if g.limit_cap_exceeded_overage_percent is not None
-                        else shapes.plain(g.value)
-                    )
-                notes.append(f"grants copied from {base.slug}")
-            await _apply_grants(
-                created.slug,
-                {e: v for e, v in {**start, **(grants or {})}.items() if v is not None},
-                {},
-            )
+            await _apply_grants(created.slug, prepared, {})
             if not draft:
                 notes.append(
                     "the version is PUBLISHED; move instances to it with kaiten_update_instance"
@@ -422,7 +496,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             return shapes.report(
                 "created",
                 "license",
-                await _version_view(created, [], list_instances=True, plan=fam.slug),
+                await _version_view(
+                    created, [], list_instances=True, plan=fam.slug, ai_enabled=ai_enabled
+                ),
                 notes=notes,
             )
 
@@ -430,6 +506,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             raise ToolError(
                 "A new plan needs name and type. To change an existing plan pass license or new_version_of."
             )
+        prepared = await _prepare_grants(grants or {}, {}, ai_enabled=ai_enabled, creating=True)
         created = await k.licenses.create(
             name=name,
             type=type,
@@ -438,13 +515,13 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             slug=shapes.slug(slug, "license") if slug else None,
             lifecycle_state="DRAFT" if draft else None,
         )
-        await _apply_grants(
-            created.slug, {e: v for e, v in (grants or {}).items() if v is not None}, {}
-        )
+        await _apply_grants(created.slug, prepared, {})
         return shapes.report(
             "created",
             "license",
-            await _version_view(created, [], list_instances=True, plan=created.slug),
+            await _version_view(
+                created, [], list_instances=True, plan=created.slug, ai_enabled=ai_enabled
+            ),
         )
 
     @mcp.tool(annotations=WRITE)
