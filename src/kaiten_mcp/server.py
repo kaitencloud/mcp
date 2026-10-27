@@ -83,7 +83,11 @@ def build(*, writes: bool | None = None) -> FastMCP:
 
 
 def http_app(mcp: FastMCP):
-    """The Streamable HTTP app, stateless so any replica can serve any request."""
+    """Stateless Streamable HTTP, with no process-token fallback for API calls.
+
+    Discovery is public; the SDK requires a caller Bearer token for upstream calls,
+    and Kaiten validates it. Host/Origin protection is not caller authentication.
+    """
     allowed_hosts = [h for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
     allowed_origins = [o for o in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
     return mcp.http_app(

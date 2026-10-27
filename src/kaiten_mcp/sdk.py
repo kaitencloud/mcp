@@ -26,12 +26,17 @@ _client: AsyncKaitenClient | None = None
 
 
 def caller_token() -> str:
-    """The calling client's token: its Authorization header, else KAITEN_API_TOKEN (stdio)."""
+    """HTTP uses only the caller's Bearer token; stdio uses KAITEN_API_TOKEN."""
     try:
-        header = get_http_request().headers.get("authorization") or ""
+        request = get_http_request()
     except RuntimeError:  # not inside an HTTP request: stdio
-        header = ""
-    token = header or settings.api_token
+        token = settings.api_token
+    else:
+        token = request.headers.get("authorization") or ""
+        # An HTTP caller never inherits the process credential, even for an empty
+        # or malformed header. Kaiten's gateway validates the token and its scopes.
+        if not token.lower().startswith("bearer ") or len(token[7:].split()) != 1:
+            token = ""
     if token.lower().startswith("bearer "):
         token = token[7:]
     if not token.strip():

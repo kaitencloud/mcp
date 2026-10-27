@@ -90,13 +90,20 @@ get a token.
 | Variable | Default | |
 | --- | --- | --- |
 | `KAITEN_API_BASE_URL` | `http://localhost:6060/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
-| `KAITEN_API_TOKEN` | | The token for stdio, or for an HTTP request that brings none |
+| `KAITEN_API_TOKEN` | | The token for stdio only; never used for HTTP requests |
 | `KAITEN_MCP_READ_ONLY` | `false` | Register read tools only (also `--read-only`) |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP listener |
 | `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | | Comma-separated allowlists for the HTTP transport's Host/Origin check. Without them, the check applies when bound to localhost only |
 | `KAITEN_API_TIMEOUT` | `30` | Seconds per API call |
 
 `GET /health` reports the server's version and whether Kaiten's gateway answers.
+
+HTTP API calls require the caller's own nonempty `Authorization: Bearer ksh_...` header. Missing,
+empty or malformed credentials fail before any API call; `KAITEN_API_TOKEN` is never an HTTP fallback,
+even on a single-user server. Existing headerless HTTP clients must start sending a token or use stdio.
+Kaiten's gateway validates the caller's token and scopes; a 401 or 403 is never retried with a process
+credential. MCP initialization and tool discovery remain public, as does `/health`. Host/Origin
+allowlists protect the transport but do not authenticate callers; use TLS for remote connections.
 
 ## Development
 
