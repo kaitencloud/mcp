@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **37 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **31 tools by default**, plus six experimental AI-credit intents when explicitly enabled, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -48,7 +48,7 @@ like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` | `kaiten_report_usage` |
-| AI credits | `kaiten_get_ai_models` · `kaiten_get_ai_rules` · `kaiten_get_ai_history` | `kaiten_save_ai_model` · `kaiten_save_ai_rule` · `kaiten_report_ai_usage` |
+| AI credits (opt-in only) | `kaiten_get_ai_models` · `kaiten_get_ai_rules` · `kaiten_get_ai_history` | `kaiten_save_ai_model` · `kaiten_save_ai_rule` · `kaiten_report_ai_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
@@ -61,6 +61,35 @@ In the tools' arguments, `plan` is a License family, whose current version an in
 `license` an exact License version.
 
 ## AI credit control plane
+
+AI discovery and attempts are **off by default**. Set `KAITEN_MCP_ENABLE_AI=true` before starting the
+process to register the experimental module: three AI reads in read-only mode, all six intents in write
+mode. Unset, false and malformed values deny; only `true` (case-insensitive, surrounding whitespace
+ignored) opts in. Restart the process to change this fixed policy. The default schema and initialization
+instructions contain no AI-credit choices or guidance, and calls to unregistered AI names make no API requests.
+
+This is local opt-in, **not authorization**. The API independently authenticates/scopes the caller and
+requires its deployment AI policy; a server `403 AIUsage.Disabled` remains authoritative, even with local
+opt-in or caller metadata. No tool changes that policy or calls a provider. Plan a quiesce/drain before
+server disable: disabling during inference may leave settlement pending; retain the transaction identity.
+
+While locally off, generic AI entitlement/grant changes, removals, copies and numeric adjustments are
+refused before writes. Mixed grant patches are validated in full before license creation/update; ordinary
+patches keep unmentioned hidden grants rather than deleting them. Operational catalogs/search/usage and
+instance/customer views omit classified AI rows using contract types, never arbitrary config/metadata
+keys. Immutable audit evidence (including journal/invoice data in payloads) remains readable unchanged;
+AI inference/reservation history is a separate gated operational surface. Financial precision is not
+recomputed from the numeric operational usage view.
+
+Targeting inspection uses Core's original-type metadata (`entitlementType` on known schema entries,
+`entitlementTypes` beside rehearsal facts), without extra catalogue requests or read permissions. Only
+`__kaiten.entitlements` entries are filtered; arbitrary CONFIG values, metadata, CEL and ordinary flag
+results are unchanged. Older servers without this metadata have unclassified entitlement suggestions
+and facts omitted while locally off, rather than assuming a shared NUMBER shape is not AI.
+
+The installed SDK's private authenticated HTTP bridge stays in use until a coherent experimental SDK
+namespace/contract is available. No SDK pin change or eager experimental namespace import is required.
+
 
 Models are identities owned by your organization, with exact provider aliases and optional USD vendor
 costs — not a synchronized provider catalogue, credential store, or inference runtime. Model costs use
@@ -135,12 +164,17 @@ get a token.
 | --- | --- | --- |
 | `KAITEN_API_BASE_URL` | `http://localhost:6060/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
 | `KAITEN_API_TOKEN` | | The token for stdio, or for an HTTP request that brings none |
+| `KAITEN_MCP_ENABLE_AI` | `false` | Explicit `true` registers experimental AI intents; not server authorization |
 | `KAITEN_MCP_READ_ONLY` | `false` | Register read tools only (also `--read-only`) |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP listener |
 | `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | | Comma-separated allowlists for the HTTP transport's Host/Origin check. Without them, the check applies when bound to localhost only |
 | `KAITEN_API_TIMEOUT` | `30` | Seconds per API call |
 
 `GET /health` reports the server's version and whether Kaiten's gateway answers.
+
+For shared HTTP deployments, leave `KAITEN_API_TOKEN` unset: an absent Authorization header otherwise
+uses that process credential (the existing single-user/stdio fallback). A supplied caller credential
+always takes precedence; denial never retries as the process token.
 
 ## Development
 

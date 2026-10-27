@@ -18,7 +18,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from . import sdk, shapes
+from . import ai_policy, sdk, shapes
 
 # Concurrent requests a single tool call may have in flight.
 FANOUT = 8
@@ -44,6 +44,7 @@ class Snapshot:
     entitlements: dict[str, Any]
     plans: dict[str, str]  # license family id -> plan slug
     usage: dict[str, list[Any]] = field(default_factory=dict)
+    ai_enabled: bool = False
 
     def license_of(self, inst: Any) -> Any:
         return self.licenses.get(inst.license_slug)
@@ -58,6 +59,7 @@ async def snapshot(
     *,
     keep: Callable[[Any], bool] | None = None,
     with_usage: bool = True,
+    ai_enabled: bool = False,
 ) -> Snapshot:
     k = sdk.kaiten()
     if instances is None:
@@ -71,6 +73,7 @@ async def snapshot(
         grants={},
         entitlements={e.slug: e for e in entitlements},
         plans=plans,
+        ai_enabled=ai_enabled,
     )
     used = sorted({i.license_slug for i in snap.instances})
     for slug_, grants in zip(
@@ -89,8 +92,10 @@ def entitlements_view(snap: Snapshot, inst: Any) -> dict[str, Any]:
     limits, features, config = [], {}, {}
     for g in snap.grants.get(inst.license_slug, []):
         slug_ = g.entitlement_slug
+        definition = snap.entitlements.get(slug_)
+        if not ai_policy.visible(g, enabled=snap.ai_enabled, definition=definition):
+            continue
         if g.entitlement_type in shapes.METERED:
-            definition = snap.entitlements.get(slug_)
             u = usage.get(slug_)
             row = {
                 "entitlement": slug_,
@@ -108,7 +113,7 @@ def entitlements_view(snap: Snapshot, inst: Any) -> dict[str, Any]:
             limits.append(row)
         elif g.entitlement_type == "BOOLEAN":
             features[slug_] = shapes.plain(g.value)
-        else:
+        elif g.entitlement_type == "CONFIG":
             config[slug_] = shapes.plain(g.value)
     return {"limits": limits, "features": features, "config": config}
 

@@ -8,11 +8,17 @@ import json
 import httpx
 import pytest
 from fastmcp import Client
-from test_tools import call, kaiten
+from test_tools import kaiten
 
 from kaiten_mcp import sdk
 from kaiten_mcp.server import build
 from kaiten_mcp.tools.ai import decimal_string, rates_in, usage_in
+
+
+async def call(tool, **args):
+    async with Client(build(writes=True, ai_enabled=True)) as c:
+        return await c.call_tool(tool, args, raise_on_error=False)
+
 
 ENT = {
     "id": "e1",
@@ -65,7 +71,8 @@ async def test_ai_phase_retries_keep_identity_and_exact_body(phase, status):
         "ai": {
             "transactionId": "call-001",
             "phase": phase,
-            "credits": {"charged": "0.000001"},
+            "credits": {"charged": "999999999999.999999"},
+            "vendorCost": {"amount": "0.000000000001", "currency": "USD"},
             "remaining": "1.000001",
         },
     }
@@ -85,6 +92,7 @@ async def test_ai_phase_retries_keep_identity_and_exact_body(phase, status):
         model="provider/assistant-2026",
         request_type="COMPLETION",
         usage={"inputTokens": 100, "outputTokens": 50},
+        metadata={"trace": {"provider": "own", "ordinal": 1}},
     )
     if status:
         args["request_status"] = status
@@ -95,6 +103,7 @@ async def test_ai_phase_retries_keep_identity_and_exact_body(phase, status):
     assert bodies[0] == bodies[1]
     assert bodies[0]["value"]["transactionId"] == "call-001"
     assert bodies[0]["value"]["type"] == "ai_usage"
+    assert bodies[0]["metadata"] == args["metadata"]
     assert all("Idempotency-Key" not in r.headers for r in seen)
     assert [r.url.path for r in seen if r.method == "POST"] == [
         "/api/instances/acme-prod/entitlements/ai-credits/usage"
@@ -330,11 +339,11 @@ async def test_ai_requires_sum_before_entitlement_write():
 
 
 async def test_ai_read_only_and_idempotent_phase_annotations():
-    async with Client(build(writes=False)) as client:
+    async with Client(build(writes=False, ai_enabled=True)) as client:
         names = {t.name for t in await client.list_tools()}
     assert {"kaiten_get_ai_models", "kaiten_get_ai_rules", "kaiten_get_ai_history"} <= names
     assert "kaiten_report_ai_usage" not in names
-    async with Client(build(writes=True)) as client:
+    async with Client(build(writes=True, ai_enabled=True)) as client:
         tools = {t.name: t for t in await client.list_tools()}
     assert tools["kaiten_report_ai_usage"].annotations.idempotent_hint
     assert not tools["kaiten_report_usage"].annotations.idempotent_hint
@@ -440,3 +449,28 @@ async def test_rule_creation_preserves_decimal_strings():
     assert body["rates"]["perInputToken"] == "0.0000000001"
     assert body["maximumCreditsPerRequest"] == "999999999999.999999"
     assert seen[-1].url.path == "/api/licenses/premium-v1/conversion-rules"
+
+
+async def test_normalized_ai_numeric_set_still_requires_append_when_enabled(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from kaiten_mcp import views
+
+    inst = SimpleNamespace(slug="acme-prod", license_slug="premium-v1")
+    grant = SimpleNamespace(entitlement_slug="ai-credits", entitlement_type="NUMBER")
+    snap = SimpleNamespace(
+        grants={"premium-v1": [grant]},
+        entitlements={"ai-credits": SimpleNamespace(type="NUMBER_AI_CREDIT")},
+    )
+    monkeypatch.setattr(views, "instance", AsyncMock(return_value=inst))
+    monkeypatch.setattr(views, "snapshot", AsyncMock(return_value=snap))
+    seen = kaiten(lambda r: httpx.Response(500))
+    result = await call(
+        "kaiten_report_usage",
+        instance=inst.slug,
+        entitlement="ai-credits",
+        amount=1,
+        behavior="set",
+    )
+    assert result.is_error and not seen

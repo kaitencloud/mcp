@@ -13,7 +13,7 @@ from fastmcp.exceptions import ToolError
 from kaitencloud.types import InstanceStatus
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import READ, WRITE
 
 
@@ -32,12 +32,12 @@ def _comparable(i: Any) -> dict:
     }
 
 
-async def _summary(inst: Any) -> dict:
-    snap = await views.snapshot([inst])
+async def _summary(inst: Any, *, ai_enabled: bool = False) -> dict:
+    snap = await views.snapshot([inst], ai_enabled=ai_enabled)
     return views.instance_summary(snap, inst)
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_get_customer(
         customer: Annotated[str, Field(description="Customer slug")],
@@ -49,7 +49,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         c, instances = await asyncio.gather(
             sdk.require(k.customers.get(cslug), f"customer {cslug!r}"), k.instances.list()
         )
-        snap = await views.snapshot(instances, keep=lambda i: i.customer_slug == cslug)
+        snap = await views.snapshot(
+            instances, keep=lambda i: i.customer_slug == cslug, ai_enabled=ai_enabled
+        )
         return {
             "customer": shapes.customer(c),
             "instances": [views.instance_summary(snap, i) for i in snap.instances],
@@ -68,7 +70,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         attention, and its most recent audit events."""
         k = sdk.kaiten()
         inst = await views.instance(instance)
-        snap = await views.snapshot([inst])
+        snap = await views.snapshot([inst], ai_enabled=ai_enabled)
         out: dict[str, Any] = views.instance_summary(snap, inst)
         if inst.deployment_zone_slug:
             z = await k.deployment_zones.get(inst.deployment_zone_slug)
@@ -137,7 +139,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 )
             )
 
-        snap = await views.snapshot(await k.instances.list(), keep=keep, with_usage=needs_attention)
+        snap = await views.snapshot(
+            await k.instances.list(), keep=keep, with_usage=needs_attention, ai_enabled=ai_enabled
+        )
         rows = []
         for i in snap.instances:
             if plan and snap.plan_of(i) != plan:
@@ -252,6 +256,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         k = sdk.kaiten()
         cslug = shapes.slug(customer, "customer")
         notes = []
+        lic = await views.resolve_license(plan=plan, license=license)
+        await ai_policy.require_license_available(lic.slug, enabled=ai_enabled)
         cust = await sdk.get_or_none(k.customers.get(cslug))
         if cust is None:
             if not customer_name:
@@ -260,7 +266,6 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 )
             cust = await k.customers.create(name=customer_name, slug=cslug)
             notes.append(f"created customer {cslug}")
-        lic = await views.resolve_license(plan=plan, license=license)
         zone_id = None
         if deployment_zone:
             zslug = shapes.slug(deployment_zone, "deployment_zone")
@@ -286,7 +291,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             end_license_date=end,
             metadata=metadata,
         )
-        return shapes.report("created", "instance", await _summary(created), notes=notes)
+        return shapes.report(
+            "created", "instance", await _summary(created, ai_enabled=ai_enabled), notes=notes
+        )
 
     @mcp.tool(annotations=WRITE)
     async def kaiten_update_instance(
@@ -336,7 +343,11 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
 
         license_id = cur.license_id
         if plan or license:
-            license_id = (await views.resolve_license(plan=plan, license=license)).id
+            target = await views.resolve_license(plan=plan, license=license)
+            if target.id != cur.license_id:
+                await ai_policy.require_license_available(cur.license_slug, enabled=ai_enabled)
+                await ai_policy.require_license_available(target.slug, enabled=ai_enabled)
+            license_id = target.id
         zone_id = cur.deployment_zone_id
         if deployment_zone is not None:
             zslug = shapes.slug(deployment_zone, "deployment_zone")
@@ -408,7 +419,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         return shapes.report(
             "updated" if actual else "unchanged",
             "instance",
-            await _summary(after),
+            await _summary(after, ai_enabled=ai_enabled),
             changes=actual,
             notes=notes,
         )

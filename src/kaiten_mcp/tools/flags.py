@@ -24,7 +24,7 @@ from kaitencloud import targeting
 from kaitencloud.types import FeatureFlagType
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import READ, WRITE
 
 RULES_DESCRIPTION = (
@@ -160,7 +160,7 @@ async def evaluation_context(
     return ctx
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_get_flags(
         flag: Annotated[
@@ -242,7 +242,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         evaluation would, and returns whether it matched and the facts it read. Without one: the facts Kaiten
         provides under __kaiten, with their types and known keys. Writes nothing."""
         if not rule:
-            return await sdk.call_unwrapped("GET", "feature-flags/targeting/context")
+            schema = await sdk.call_unwrapped("GET", "feature-flags/targeting/context")
+            return ai_policy.targeting_context(schema, enabled=ai_enabled)
         ctx = await evaluation_context(customer, instance, context)
         body = shapes.drop_none(
             {"rule": rule, "targetingKey": ctx.pop("targetingKey", None), "context": ctx or None}
@@ -256,7 +257,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 else None,
                 "issues": [i["message"] for i in r.get("issues") or []] or None,
                 "evaluation_error": r.get("evaluationError"),
-                "facts": r.get("facts"),
+                "facts": ai_policy.targeting_facts(
+                    r.get("facts"), r.get("entitlementTypes"), enabled=ai_enabled
+                ),
             }
         )
 
