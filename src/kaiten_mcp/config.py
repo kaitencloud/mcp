@@ -20,8 +20,8 @@ class Settings:
     # internal JWT the API trusts, and a client's ksh_ token reaches this
     # server untouched.
     api_base_url: str
-    # Used when no request header carries a credential: the stdio transport,
-    # or a single-user HTTP deployment.
+    # Used only by stdio. HTTP requires the caller's own Authorization header,
+    # even when this process credential is configured.
     api_token: str
     # Register only the tools that read. The credential still bounds what an
     # agent can do; this bounds what it can even attempt.

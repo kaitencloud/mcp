@@ -101,8 +101,10 @@ curl http://localhost:8000/health
 - **A tool answers `Kaiten API error (401 Unauthorized) [ValidateToken.Invalid]`** — Kaiten refused the
   credential: it must be `Bearer ksh_...`, active, and not expired. The server forwards it without
   checking it, so `/mcp` itself answers, and lists the tools, whatever the token.
-- **A tool answers `No Kaiten credential`** — the request brought no `Authorization` header, and the
-  server has no `KAITEN_API_TOKEN` to fall back on.
+- **A tool answers `No Kaiten credential`** — for HTTP, send a nonempty
+  `Authorization: Bearer ksh_...` header on every request. Missing, empty or malformed headers are
+  rejected before any API call, even if the server has `KAITEN_API_TOKEN` configured. For stdio, set
+  `KAITEN_API_TOKEN` in the server's environment.
 - **A tool answers `Kaiten API error (403 Forbidden) [Auth.MissingScope]`** — the token lacks the scope
   that operation needs, which the message names; issue one with more.
 - **Every call fails to connect** — `KAITEN_API_BASE_URL` must be the gateway as seen *from the server*
@@ -111,7 +113,11 @@ curl http://localhost:8000/health
 
 ## Security
 
-- The server holds no credential of its own: each request acts as its caller's token, and nothing more.
+- HTTP API calls act only as the caller's Bearer token; `KAITEN_API_TOKEN` is exclusively for stdio.
+  There is no single-user HTTP fallback. Headerless HTTP clients must send their token or use stdio.
+  Invalid tokens and missing scopes are rejected by Kaiten, never retried as the process token.
+- MCP initialization/tool discovery and `/health` are public. Host/Origin checks are not caller
+  authentication; use TLS when sending tokens to a remote server.
 - Give an agent the least it needs. A read-only server (`KAITEN_MCP_READ_ONLY=true`) cannot even attempt a
   write, whatever its token allows.
 - Never commit a client configuration that contains a token; prefer environment variables or a prompt.
