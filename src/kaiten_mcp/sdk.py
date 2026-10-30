@@ -13,12 +13,14 @@ never acts with more than its own token allows.
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
-from fastmcp.server.middleware import Middleware
-from kaitencloud import APIStatusError, AsyncKaitenClient, KaitenError, NotFoundError
+from kaitencloud import APIStatusError, AsyncKaitenClient, NotFoundError
 
 from .config import settings
 
@@ -98,19 +100,39 @@ def describe(e: APIStatusError) -> str:
     message = f"Kaiten API {e.status_code} {e.code or ''}: {e.detail or e.title or ''}".replace(
         "  ", " "
     )
+    if e.error_id:  # the only handle on what a 5xx withheld
+        message += f" (errorId: {e.error_id})"
     for err in e.errors or []:
         where = getattr(err, "location", None) or ""
         message += f"\n  - {where}: {getattr(err, 'message', err)}"
     return message
 
 
-class KaitenErrors(Middleware):
-    """Turn SDK errors into tool errors that carry the API's code and detail, the parts an agent can act on."""
+def answering(tool: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """A tool whose refusals from Kaiten leave it as its own errors, shaped by describe().
 
-    async def on_call_tool(self, context, call_next):
+    FastMCP takes any other exception out of a tool for a crash: it logs its traceback, and hands
+    the agent a wrapper of its own ("Error calling tool ..."), before any middleware runs. A refusal
+    is an answer: as a ToolError, it is logged on one line, and the agent reads its code, its detail
+    and each field at fault. Any other exception stays FastMCP's, logged with its traceback.
+    """
+
+    @functools.wraps(tool)
+    async def run(*args: Any, **kwargs: Any) -> Any:
         try:
-            return await call_next(context)
+            return await tool(*args, **kwargs)
         except APIStatusError as e:
             raise ToolError(describe(e)) from e
-        except KaitenError as e:
-            raise ToolError(f"Kaiten: {e}") from e
+
+    return run
+
+
+class Tools:
+    """The server as the tool modules see it: what they use of it, tool(), with every tool answering."""
+
+    def __init__(self, mcp: FastMCP) -> None:
+        self.mcp = mcp
+
+    def tool(self, **settings: Any) -> Callable[[Callable[..., Awaitable[Any]]], Any]:
+        register = self.mcp.tool(**settings)
+        return lambda tool: register(answering(tool))
