@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .config import settings
-from .sdk import KaitenErrors
+from .sdk import Tools
 from .tools import register_all
 
 try:
@@ -56,9 +56,8 @@ def build(*, writes: bool | None = None) -> FastMCP:
         instructions=INSTRUCTIONS,
         version=VERSION,
         website_url="https://kaiten.sh",
-        middleware=[KaitenErrors()],
     )
-    register_all(mcp, writes=not settings.read_only if writes is None else writes)
+    register_all(Tools(mcp), writes=not settings.read_only if writes is None else writes)
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(_: Request) -> JSONResponse:

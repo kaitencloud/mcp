@@ -98,15 +98,18 @@ curl http://localhost:8000/health
 
 ## Troubleshooting
 
-- **A tool answers `Kaiten API error (401 Unauthorized) [ValidateToken.Invalid]`** — Kaiten refused the
-  credential: it must be `Bearer ksh_...`, active, and not expired. The server forwards it without
-  checking it, so `/mcp` itself answers, and lists the tools, whatever the token.
+- **A tool answers `Kaiten API 401 ValidateToken.Invalid`** — Kaiten refused the credential: it must be
+  `Bearer ksh_...`, active, and not expired. The server forwards it without checking it, so `/mcp` itself
+  answers, and lists the tools, whatever the token.
 - **A tool answers `No Kaiten credential`** — for HTTP, send a nonempty
   `Authorization: Bearer ksh_...` header on every request. Missing, empty or malformed headers are
   rejected before any API call, even if the server has `KAITEN_API_TOKEN` configured. For stdio, set
   `KAITEN_API_TOKEN` in the server's environment.
-- **A tool answers `Kaiten API error (403 Forbidden) [Auth.MissingScope]`** — the token lacks the scope
-  that operation needs, which the message names; issue one with more.
+- **A tool answers `Kaiten API 403 Auth.MissingScope`** — the token lacks the scope that operation needs,
+  which the message names; issue one with more.
+- **A tool answers `Kaiten API 422 ...`, then lines `- body.<field>: ...`** — Kaiten refused the values
+  sent, and each line names a field at fault and why. A refusal is an answer: the server logs it on one
+  line, where an unexpected error is logged with its traceback.
 - **Every call fails to connect** — `KAITEN_API_BASE_URL` must be the gateway as seen *from the server*
   (inside Docker, not `localhost`). `GET /health` says whether it answers.
 - **Tools changed but the client shows the old ones** — restart the client; most cache the tool list.
