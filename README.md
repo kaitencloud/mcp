@@ -23,7 +23,9 @@ rules in Kaiten's product vision for agent-readiness:
   current version, finds the zone, creates the customer if asked and sets the license term; the agent never
   handles an id. `kaiten_get_customer` answers "how is this customer doing" in one call.
 - **Reads return slices, never the whole catalog.** Resources are projected onto the fields that carry
-  meaning, named by slug, with usage already set against its limit (`used`, `limit`, `percent`, `state`).
+  meaning, named by slug, with usage already set against its limit (`used`, `limit`, `percent`, `state`):
+  the effective limit Kaiten enforces, the License's grant with the instance's add-ons, voucher boosts and
+  entitlement exception applied.
 - **Writes merge, and report truthfully.** Only what an agent passes changes. Every write answers with a
   `status` — `created`, `updated`, `unchanged`, `recorded`, `rejected`, `preview` or `deleted` — and the
   exact `changes`, computed from what Kaiten holds afterwards. A call that changes nothing says `unchanged`
