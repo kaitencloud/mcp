@@ -37,6 +37,9 @@ The model, top down:
 - Feature flags are evaluated through OpenFeature, with CEL targeting rules reading the customer's
   license and entitlements, and the instance, customer and zone (under __kaiten).
 - Deployment zones run immutable Releases, each a set of versioned Components.
+- Where billing is on, a License version carries prices; an Instance has at most one subscription, pinned to
+  a flat fee, and an invoice is composed at each boundary of it. Add-ons and vouchers sit on top of the
+  License. kaiten_get_billing says whether billing is on, and is the first call for it.
 
 How to work:
 - Start with kaiten_overview, find things with kaiten_search, and read with the kaiten_get_* tools.

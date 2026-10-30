@@ -81,16 +81,46 @@ async def require(call: Any, what: str) -> Any:
 
 
 # The SDK wraps every operation an application calls; the targeting authoring
-# endpoints and OFREP evaluation are left to the console and to OpenFeature.
-# These go through the SDK's own transport (credential, retries, typed errors)
-# and decode to plain JSON, until sdk-python grows methods for them.
+# endpoints, OFREP evaluation and billing are left to the console and to
+# OpenFeature, or came after it. These go through the SDK's own transport
+# (credential, retries, typed errors) and decode to plain JSON, until
+# sdk-python grows methods for them.
+
+
+# What Kaiten's billing routes answer where billing is off, and what that means for
+# the agent. GET /billing/capabilities, which answers either way, says the same.
+BILLING_OFF = {
+    "Billing.Disabled": "Billing is off on this Kaiten installation: a self-hosted operator turns "
+    "it on with KAITEN_BILLING_ENABLED.",
+    "Billing.NotEntitled": "Billing is not included in this organization's Kaiten plan.",
+    "Billing.EntitlementCheckUnavailable": "Kaiten could not check whether this organization's "
+    "plan includes billing, and changed nothing: try again.",
+}
+
+
+def billing_off(code: str) -> str:
+    return (
+        f"{BILLING_OFF.get(code, 'Billing is off.')} Licenses, entitlements, usage and entitlement "
+        "exceptions work without it; prices, subscriptions, invoices, add-ons and vouchers need it."
+    )
 
 
 async def call_unwrapped(
-    method: str, path: str, body: Any = None, *, idempotent: bool | None = None
+    method: str,
+    path: str,
+    body: Any = None,
+    *,
+    idempotent: bool | None = None,
+    params: dict[str, Any] | None = None,
 ) -> Any:
     api = kaiten()._api
-    response = await api.request(method, path, body=body, idempotent=idempotent)
+    try:
+        response = await api.request(method, path, body=body, idempotent=idempotent, params=params)
+    except APIStatusError as e:
+        if e.code in BILLING_OFF:
+            # The tool's own error: the agent reads why, and the server logs no traceback.
+            raise ToolError(f"{billing_off(e.code)} ({e.code})") from e
+        raise
     return api.decode(response)
 
 

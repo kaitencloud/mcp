@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **31 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **41 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -39,7 +39,8 @@ There is no API contract in this repository. Every call goes through the officia
 [Python SDK](https://github.com/kaitencloud/sdk-python) (`kaitencloud`), generated from Kaiten's OpenAPI
 document: its methods, its models, its enums (which become the tools' input schemas), its enforcement
 arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). A new API field reaches the
-MCP by bumping the SDK.
+MCP by bumping the SDK. The routes the SDK has no method for yet (targeting rules, OFREP evaluation and
+billing) go through its transport, with the same credential, retries and errors, as plain JSON.
 
 ## Tools
 
@@ -49,6 +50,7 @@ MCP by bumping the SDK.
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` | `kaiten_report_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
+| Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
 | Access & audit | `kaiten_get_access` · `kaiten_get_audit_trail` | `kaiten_issue_token` · `kaiten_revoke_token` |
@@ -58,6 +60,25 @@ MCP by bumping the SDK.
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
 In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
 `license` an exact License version.
+
+The billing tools need billing to be on for the organization: `kaiten_get_billing` says whether it is, and
+why not, and the others answer with that explanation rather than a bare 403. A voucher's code is a secret:
+answers show its last four characters (`code_hint`), and the full code only in the answer of
+`kaiten_save_voucher` that creates it, where the caller just gave it. Each tool names the scopes it needs in
+its description:
+
+| Billing tool | Scopes |
+| --- | --- |
+| `kaiten_get_billing` | `read:billing`; `read:addons` and `read:vouchers` for what is on sale; `read:instances` and `read:voucher_redemptions` for an instance |
+| `kaiten_get_prices` | `read:licenses` |
+| `kaiten_get_invoices` | `read:billing` |
+| `kaiten_save_prices` | `write:licenses` |
+| `kaiten_subscribe_instance` | `write:billing`, `read:instances`, `read:licenses` |
+| `kaiten_cancel_subscription` | `write:billing`, `read:instances` |
+| `kaiten_set_instance_addon` | `write:instances` |
+| `kaiten_save_voucher` | `write:vouchers`; `read:licenses` to restrict it to License versions |
+| `kaiten_redeem_voucher` | `write:voucher_redemptions` |
+| `kaiten_mark_invoice_paid` | `write:billing` |
 
 ## Running it
 
@@ -113,7 +134,8 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest                  # unit tests: the real SDK over a mocked Kaiten
 ```
 
-`tests/e2e` drives every tool through a real MCP client against a live Kaiten. With
+`tests/e2e` drives every tool but the billing ones through a real MCP client against a live Kaiten: a
+subscription and its invoices can never be deleted, and the suite cleans up after itself. With
 [Kaiten](https://github.com/kaitencloud/kaiten)'s own stack and its demo dataset (`task quickstart`, which
 seeds the Kaiten Sushi Shop), and a token with `read:*` and `write:*` on that organization:
 

@@ -15,9 +15,20 @@ from pydantic import Field
 from .. import sdk, shapes, views
 from . import DESTRUCTIVE, READ, WRITE
 
-# The scopes the API knows, as the SDK's contract lists them. The API also
-# accepts the read:* / write:* wildcards, which the contract does not enumerate.
-SCOPES = sorted(get_args(Scope))
+# The scopes the API knows, as the SDK's contract lists them, and the billing
+# modules' scopes, which Kaiten added after it. The API also accepts the
+# read:* / write:* wildcards, which the contract does not enumerate.
+BILLING_MODULES = (
+    "billing",
+    "addons",
+    "vouchers",
+    "voucher_redemptions",
+    "publishable_keys",
+    "customer_sessions",
+)
+SCOPES = sorted(
+    {*get_args(Scope), *(f"{a}:{m}" for a in ("read", "write") for m in BILLING_MODULES)}
+)
 SCOPES_HELP = (
     "Scopes to grant, least privilege: any of "
     + ", ".join(SCOPES)
