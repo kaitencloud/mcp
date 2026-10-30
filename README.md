@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **31 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **34 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -39,7 +39,9 @@ There is no API contract in this repository. Every call goes through the officia
 [Python SDK](https://github.com/kaitencloud/sdk-python) (`kaitencloud`), generated from Kaiten's OpenAPI
 document: its methods, its models, its enums (which become the tools' input schemas), its enforcement
 arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). A new API field reaches the
-MCP by bumping the SDK.
+MCP by bumping the SDK. Kaiten Cloud's webhook routes are in no OpenAPI document: the server calls them in the
+shapes Kaiten's console sends, and carries the catalogue of the event types they subscribe to, the 116 of
+Kaiten 26.10.7's contract.
 
 ## Tools
 
@@ -53,11 +55,25 @@ MCP by bumping the SDK.
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
 | Access & audit | `kaiten_get_access` · `kaiten_get_audit_trail` | `kaiten_issue_token` · `kaiten_revoke_token` |
 | Settings | `kaiten_get_metadata_fields` · `kaiten_get_connectors` | `kaiten_save_metadata_field` · `kaiten_configure_connector` |
+| Webhooks | `kaiten_get_webhooks` | `kaiten_save_webhook` · `kaiten_delete_webhook` (previews unless `confirm=true`) |
 | Deletion | | `kaiten_delete` (previews unless `confirm=true`) |
 
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
 In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
 `license` an exact License version.
+
+Webhooks are part of Kaiten Cloud, for an organization whose Kaiten License grants webhook events; the tools
+need `read:webhooks` and `write:webhooks`. Where they are not served, the tools say why, and point a
+self-hosted Kaiten to its [event stream](https://docs.kaiten.sh/docs/self-hosting/consuming-events), which
+carries the same event types. `kaiten_get_webhooks(events="warning threshold")` finds a type from the
+catalogue on any edition, and `kaiten_save_webhook` shows a new endpoint's signing secret in the answer that
+creates it, and nowhere else.
+
+A webhook URL can be a credential as well: a Slack incoming-webhook URL is one. Answers show its scheme and
+host only, `https://hooks.slack.com/…`, never its path, query or user info, and a receiver's response is shown
+with that path taken out. Endpoints on one host are told apart by their id, which `kaiten_delete_webhook`
+takes; `kaiten_save_webhook` and `kaiten_delete_webhook` also take the full URL, and match it without showing
+it.
 
 ## Running it
 
@@ -113,7 +129,8 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest                  # unit tests: the real SDK over a mocked Kaiten
 ```
 
-`tests/e2e` drives every tool through a real MCP client against a live Kaiten. With
+`tests/e2e` drives every tool but the webhook ones, which only Kaiten Cloud serves, through a real MCP client
+against a live Kaiten. With
 [Kaiten](https://github.com/kaitencloud/kaiten)'s own stack and its demo dataset (`task quickstart`, which
 seeds the Kaiten Sushi Shop), and a token with `read:*` and `write:*` on that organization:
 
