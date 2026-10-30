@@ -37,6 +37,8 @@ The model, top down:
 - Feature flags are evaluated through OpenFeature, with CEL targeting rules reading the customer's
   license and entitlements, and the instance, customer and zone (under __kaiten).
 - Deployment zones run immutable Releases, each a set of versioned Components.
+- Kaiten publishes an event for each change (INSTANCE_CREATED, com.kaiten.instance.v1.created). Kaiten Cloud
+  delivers the ones a webhook names to its URL; a self-hosted Kaiten publishes them to its event stream.
 
 How to work:
 - Start with kaiten_overview, find things with kaiten_search, and read with the kaiten_get_* tools.
