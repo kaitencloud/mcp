@@ -35,7 +35,29 @@ DESTRUCTIVE = {
 
 
 def register_all(mcp: FastMCP, *, writes: bool) -> None:
-    from . import access, accounts, catalog, delete, flags, overview, releases, settings, usage
+    from . import (
+        access,
+        accounts,
+        billing,
+        catalog,
+        delete,
+        flags,
+        overview,
+        releases,
+        settings,
+        usage,
+    )
 
-    for module in (overview, accounts, usage, catalog, flags, releases, access, settings, delete):
+    for module in (
+        overview,
+        accounts,
+        usage,
+        catalog,
+        billing,
+        flags,
+        releases,
+        access,
+        settings,
+        delete,
+    ):
         module.register(mcp, writes=writes)
