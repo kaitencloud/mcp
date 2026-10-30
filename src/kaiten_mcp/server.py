@@ -34,6 +34,8 @@ The model, top down:
   PUBLISHED or ARCHIVED. A plan serves its default version, else its highest published one.
 - A License grants Entitlements: BOOLEAN features, NUMBER quotas (and AI credits) metered by usage
   reports, and CONFIG values. A NUMBER grant is unlimited (-1), a hard limit, or soft with an overage %.
+- What an Instance may use is its effective value: its License's grant with its add-ons, voucher boosts and
+  entitlement exception applied. Usage is read against it; kaiten_get_catalog shows the License's grants alone.
 - Feature flags are evaluated through OpenFeature, with CEL targeting rules reading the customer's
   license and entitlements, and the instance, customer and zone (under __kaiten).
 - Deployment zones run immutable Releases, each a set of versioned Components.

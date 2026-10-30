@@ -38,9 +38,11 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         limit: Annotated[int, Field(ge=1, le=500)] = 50,
     ) -> dict:
         """Usage of metered (NUMBER and AI credit) entitlements across instances, highest percentage first: who is
-        close to a limit, who is in overage, how much of a quota a customer has left. States: ok, warning (past the
-        entitlement's warning threshold), at_limit, overage (past the included value but within the grant's
-        overage allowance), over, unlimited."""
+        close to a limit, who is in overage, how much of a quota a customer has left. Each row is measured against
+        the instance's effective limit, as Kaiten enforces it: its License's grant with its add-ons, voucher boosts
+        and entitlement exception applied (limit_includes names them). States: ok, warning (past the entitlement's
+        warning threshold), at_limit, overage (past the included value but within the overage allowance), over,
+        unlimited."""
         k = sdk.kaiten()
         snap = await views.snapshot(
             await k.instances.list(), keep=lambda i: not customer or i.customer_slug == customer
@@ -98,25 +100,22 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         inst = await views.instance(instance)
         eslug = shapes.slug(entitlement, "entitlement")
         snap = await views.snapshot([inst])
-        grant = next(
-            (g for g in snap.grants.get(inst.license_slug, []) if g.entitlement_slug == eslug), None
-        )
-        if grant is None:
-            raise ToolError(
-                f"License {inst.license_slug} of instance {inst.slug} does not grant {eslug!r}; nothing to report against."
-            )
-        if grant.entitlement_type not in shapes.METERED:
-            raise ToolError(
-                f"{eslug} is a {grant.entitlement_type} entitlement: only NUMBER and NUMBER_AI_CREDIT are metered."
-            )
-        limit = shapes.plain(grant.value)
-        pct = grant.limit_cap_exceeded_overage_percent
-        definition = snap.entitlements.get(eslug)
-        warn = definition.warning_threshold_percent if definition else None
         prior = next(
             (u for u in snap.usage.get(inst.slug, []) if u.entitlement_slug == eslug), None
         )
-        before = shapes.usage_state(shapes.plain(prior.value) if prior else 0, limit, pct, warn)
+        if prior is None:
+            raise ToolError(
+                f"Instance {inst.slug} does not hold {eslug!r}: neither its License {inst.license_slug}, an add-on "
+                "nor an exception grants it; nothing to report against."
+            )
+        definition = snap.entitlements.get(eslug)
+        if prior.value.type != "number":
+            raise ToolError(
+                f"{eslug} is a {definition.type if definition else prior.value.type} entitlement: only NUMBER and "
+                "NUMBER_AI_CREDIT are metered."
+            )
+        warn = definition.warning_threshold_percent if definition else None
+        before = shapes.effective_usage(prior, warn)
         try:
             after_raw = await k.instances.report_usage(
                 inst.slug, eslug, amount, behavior=behavior, metadata=metadata
@@ -131,7 +130,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                     "The report was refused and not recorded. Raise the grant, or move the instance to a bigger plan."
                 ],
             )
-        after = shapes.usage_state(shapes.plain(after_raw.value), limit, pct, warn)
+        after = shapes.effective_usage(after_raw, warn)
         notes = (
             [f"crossed from {before['state']} to {after['state']}"]
             if after["state"] != before["state"]
