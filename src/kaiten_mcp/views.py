@@ -4,9 +4,11 @@
 """Composite reads: the views several tools share, assembled from SDK calls.
 
 The questions an agent asks ("how is Sakura Tokyo doing", "who is near their limit")
-span a customer, its instances, their license grants and their usage. Each is
-one SDK call; a view fetches them concurrently, fetches each license's grants
-once however many instances share it, and only fetches usage when asked.
+span a customer, its instances, their licenses and their usage. Each is one SDK
+call; a view fetches them concurrently, and only fetches usage when asked. An
+instance's usage read carries its effective entitlements -- the License's grants
+with its add-ons, voucher boosts and exceptions applied -- so that is what every
+view reads, never the License's grants alone.
 """
 
 from __future__ import annotations
@@ -40,7 +42,6 @@ class Snapshot:
 
     instances: list[Any]
     licenses: dict[str, Any]
-    grants: dict[str, list[Any]]
     entitlements: dict[str, Any]
     plans: dict[str, str]  # license family id -> plan slug
     usage: dict[str, list[Any]] = field(default_factory=dict)
@@ -68,15 +69,9 @@ async def snapshot(
     snap = Snapshot(
         instances=[i for i in instances if keep is None or keep(i)],
         licenses={lic.slug: lic for lic in licenses},
-        grants={},
         entitlements={e.slug: e for e in entitlements},
         plans=plans,
     )
-    used = sorted({i.license_slug for i in snap.instances})
-    for slug_, grants in zip(
-        used, await gather_bounded(k.licenses.list_entitlements(s) for s in used), strict=True
-    ):
-        snap.grants[slug_] = grants
     if with_usage:
         rows = await gather_bounded(k.instances.list_usage(i.slug) for i in snap.instances)
         snap.usage = {i.slug: u for i, u in zip(snap.instances, rows, strict=True)}
@@ -84,32 +79,31 @@ async def snapshot(
 
 
 def entitlements_view(snap: Snapshot, inst: Any) -> dict[str, Any]:
-    """Split an instance's grants into limits (with usage), features and config."""
-    usage = {u.entitlement_slug: u for u in snap.usage.get(inst.slug, [])}
+    """Split an instance's effective entitlements into limits (with usage), features and config.
+
+    They come from its usage read, which lists every entitlement the instance holds -- one only an
+    add-on or an exception grants included -- with the value Kaiten enforces.
+    """
     limits, features, config = [], {}, {}
-    for g in snap.grants.get(inst.license_slug, []):
-        slug_ = g.entitlement_slug
-        if g.entitlement_type in shapes.METERED:
+    for u in snap.usage.get(inst.slug, []):
+        slug_ = u.entitlement_slug
+        if u.value.type == "number":
             definition = snap.entitlements.get(slug_)
-            u = usage.get(slug_)
             row = {
                 "entitlement": slug_,
-                **shapes.usage_state(
-                    shapes.plain(u.value) if u else 0,
-                    shapes.plain(g.value),
-                    g.limit_cap_exceeded_overage_percent,
-                    definition.warning_threshold_percent if definition else None,
+                **shapes.effective_usage(
+                    u, definition.warning_threshold_percent if definition else None
                 ),
             }
             if definition and (definition.unit_plural or definition.unit_singular):
                 row["unit"] = definition.unit_plural or definition.unit_singular
-            if u and u.current_period_end:
+            if u.current_period_end:
                 row["resets_at"] = shapes.iso(u.current_period_end)
             limits.append(row)
-        elif g.entitlement_type == "BOOLEAN":
-            features[slug_] = shapes.plain(g.value)
+        elif u.value.type == "boolean":
+            features[slug_] = shapes.plain(u.value)
         else:
-            config[slug_] = shapes.plain(g.value)
+            config[slug_] = shapes.plain(u.value)
     return {"limits": limits, "features": features, "config": config}
 
 

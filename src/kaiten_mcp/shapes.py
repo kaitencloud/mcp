@@ -135,6 +135,31 @@ def usage_state(
     return out
 
 
+def effective_usage(u: Any, warning_percent: int | None = None) -> dict[str, Any]:
+    """A usage read against the limit Kaiten enforces on the instance.
+
+    That limit is the read's own: the License's grant with the instance's add-ons, voucher boosts
+    and entitlement exception applied, and the allowance that goes with it -- never the License's
+    grant alone. limit_includes names the layers above the License that apply to it.
+    """
+    wire = u.to_dict()  # the wire shape, members this SDK does not type yet included
+    out = usage_state(
+        plain(wire.get("value")),
+        plain(wire.get("limit")),
+        wire.get("limitCapExceededOveragePercent"),
+        warning_percent,
+    )
+    layers = wire.get("provenance") or {}
+    above = [
+        name
+        for key, name in (("addons", "add-ons"), ("boosts", "vouchers"), ("exception", "exception"))
+        if layers.get(key)
+    ]
+    if above:
+        out["limit_includes"] = above
+    return out
+
+
 ATTENTION_STATES = {"warning", "at_limit", "overage", "over"}
 
 
