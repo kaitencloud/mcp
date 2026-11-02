@@ -42,6 +42,8 @@ The model, top down:
 - Where billing is on, a License version carries prices; an Instance has at most one subscription, pinned to
   a flat fee, and an invoice is composed at each boundary of it. Add-ons and vouchers sit on top of the
   License. kaiten_get_billing says whether billing is on, and is the first call for it.
+- Kaiten publishes an event for each change (INSTANCE_CREATED, com.kaiten.instance.v1.created). Kaiten Cloud
+  delivers the ones a webhook names to its URL; a self-hosted Kaiten publishes them to its event stream.
 
 How to work:
 - Start with kaiten_overview, find things with kaiten_search, and read with the kaiten_get_* tools.
