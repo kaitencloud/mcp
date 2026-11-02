@@ -13,7 +13,7 @@ dependencies = [
     "certifi>=2026.10.19",
     "fastmcp>=4.1.0,<5",
     "httpx>=0.28.0",
-    "kaitencloud>=1.0.0",
+    "kaitencloud>=1.1.0",
     "pyjwt>=2.15.0",
     "uvicorn>=0.32.0",
 ]
