@@ -107,9 +107,28 @@ INSTANCE = {
 }
 # What an add-on and an exception add to the License's grant, as a usage read's provenance says.
 ADDON = {
-    "addons": [{"quantity": 1, "overrideBehavior": "ADD", "value": {"type": "number", "value": 5}}]
+    "addons": [
+        {
+            "addonEntitlementId": "ae1",
+            "addonId": "a1",
+            "attachedAt": "2026-01-01T00:00:00Z",
+            "instanceAddonId": "ia1",
+            "limitCapExceededOveragePercent": None,
+            "quantity": 1,
+            "overrideBehavior": "ADD",
+            "value": {"type": "number", "value": 5},
+        }
+    ]
 }
-EXCEPTION = {"exception": {"kind": "ADD", "value": {"type": "number", "value": 5}}}
+EXCEPTION = {
+    "exception": {
+        "instanceEntitlementExceptionId": "x1",
+        "kind": "ADD",
+        "startsAt": "2026-01-01T00:00:00Z",
+        "endsAt": None,
+        "value": {"type": "number", "value": 5},
+    }
+}
 
 
 def drivers(used: float, limit: float, layers: dict) -> dict:
@@ -123,7 +142,14 @@ def drivers(used: float, limit: float, layers: dict) -> dict:
         "limit": {"type": "number", "value": limit},
         "limitCapExceededOveragePercent": 20,
         "source": "license",
-        "provenance": {"addons": [], "boosts": [], "exception": None, **layers},
+        "provenance": {
+            "addons": [],
+            "boosts": [],
+            "exception": None,
+            "license": None,
+            "number": None,
+            **layers,
+        },
     }
 
 
@@ -174,7 +200,16 @@ def a_kaiten_where(usage: dict, *, grant: float, reported: dict | None = None):
             }
         ],
         ("GET", "/license-families"): [
-            {"id": "f1", "slug": "standard", "versionCount": 1, **STAMPS}
+            {
+                "id": "f1",
+                "slug": "standard",
+                "versionCount": 1,
+                "isPublic": False,
+                "fallbackLicenseFamilySlug": None,
+                "trialEndWithoutPaymentMethod": "CANCEL",
+                "trialReminderDays": 3,
+                **STAMPS,
+            }
         ],
     }
     # The SDK sends every operation under /api.
@@ -227,7 +262,7 @@ async def test_read_only_mode_registers_no_write_tool():
 async def test_every_tool_declares_its_effect():
     async with Client(build(writes=True)) as c:
         tools = await c.list_tools()
-    assert len(tools) == 31
+    assert len(tools) == 41
     for t in tools:
         assert t.annotations.read_only_hint is not None, t.name
         assert t.description, t.name
