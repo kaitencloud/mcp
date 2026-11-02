@@ -46,6 +46,7 @@ def register_all(mcp: FastMCP, *, writes: bool) -> None:
         releases,
         settings,
         usage,
+        webhooks,
     )
 
     for module in (
@@ -58,6 +59,7 @@ def register_all(mcp: FastMCP, *, writes: bool) -> None:
         releases,
         access,
         settings,
+        webhooks,
         delete,
     ):
         module.register(mcp, writes=writes)
