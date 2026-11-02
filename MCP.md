@@ -51,7 +51,7 @@ starts local servers:
 ```
 
 With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm", "-e", "KAITEN_API_BASE_URL",
-"-e", "KAITEN_API_TOKEN", "ghcr.io/kaitencloud/kaiten-mcp:0.2", "stdio"]`, with the same `env`. A remote server is added from
+"-e", "KAITEN_API_TOKEN", "ghcr.io/kaitencloud/kaiten-mcp:0.3", "stdio"]`, with the same `env`. A remote server is added from
 **Settings → Connectors** instead.
 
 ## Cursor

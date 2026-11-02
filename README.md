@@ -111,8 +111,8 @@ KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uvx kaite
 uvx kaitencloud-mcp http --port 8000
 
 # with Docker
-docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp:0.2 stdio
-docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... ghcr.io/kaitencloud/kaiten-mcp:0.2   # http, the default
+docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp:0.3 stdio
+docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... ghcr.io/kaitencloud/kaiten-mcp:0.3   # http, the default
 
 # from a checkout
 KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
