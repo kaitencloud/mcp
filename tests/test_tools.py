@@ -231,3 +231,23 @@ async def test_every_tool_declares_its_effect():
     for t in tools:
         assert t.annotations.read_only_hint is not None, t.name
         assert t.description, t.name
+
+
+async def test_a_lifecycle_stage_is_found_whatever_its_case():
+    # Stages are free text, stored as written: an agent asking for BETA means the instances at beta.
+    beta = {**INSTANCE, "lifecycleStage": "beta"}
+    ga = {
+        **INSTANCE,
+        "id": "i2",
+        "slug": "uni-prod",
+        "name": "Uni Production",
+        "lifecycleStage": "ga",
+    }
+
+    def handler(r):
+        # The list also reads the catalogue to name plans; an empty one will do here.
+        return httpx.Response(200, json=[beta, ga] if r.url.path.endswith("/instances") else [])
+
+    kaiten(handler)
+    out = (await call("kaiten_list_instances", lifecycle_stage="BETA")).structured_content
+    assert [i["slug"] for i in out["instances"]] == ["tako-prod"]

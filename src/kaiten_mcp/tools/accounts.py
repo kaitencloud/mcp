@@ -103,7 +103,10 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             InstanceStatus | None, Field(description="Only instances with this operational status")
         ] = None,
         lifecycle_stage: Annotated[
-            str | None, Field(description="Only instances at this commercial lifecycle stage")
+            str | None,
+            Field(
+                description="Only instances at this commercial lifecycle stage, whatever its case (beta finds Beta)"
+            ),
         ] = None,
         license_ends_within_days: Annotated[
             int | None,
@@ -130,7 +133,10 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 or (license and i.license_slug != license)
                 or (deployment_zone and i.deployment_zone_slug != deployment_zone)
                 or (status and i.status != status)
-                or (lifecycle_stage and i.lifecycle_stage != lifecycle_stage)
+                or (
+                    lifecycle_stage
+                    and (i.lifecycle_stage or "").casefold() != lifecycle_stage.casefold()
+                )
                 or (
                     license_ends_within_days is not None
                     and (left is None or left > license_ends_within_days)
