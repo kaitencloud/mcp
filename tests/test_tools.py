@@ -153,10 +153,10 @@ def drivers(used: float, limit: float, layers: dict) -> dict:
     }
 
 
-def a_kaiten_where(usage: dict, *, grant: float, reported: dict | None = None):
-    """tako-prod, whose License grants `grant` drivers, whose usage read is `usage`, and whose
-    next usage report answers `reported`."""
-    routes = {
+def tako(usage: dict, *, grant: float, reported: object = None) -> dict:
+    """The routes of a Kaiten where tako-prod's License grants `grant` drivers, whose usage read is
+    `usage`, and whose next usage report answers `reported`."""
+    return {
         ("GET", "/instances"): [INSTANCE],
         ("GET", "/instances/tako-prod"): INSTANCE,
         ("GET", "/instances/tako-prod/entitlements/usage"): [usage],
@@ -212,6 +212,12 @@ def a_kaiten_where(usage: dict, *, grant: float, reported: dict | None = None):
             }
         ],
     }
+
+
+def a_kaiten_where(usage: dict, *, grant: float, reported: dict | None = None):
+    """tako-prod, whose License grants `grant` drivers, whose usage read is `usage`, and whose
+    next usage report answers `reported`."""
+    routes = tako(usage, grant=grant, reported=reported)
     # The SDK sends every operation under /api.
     kaiten(lambda r: httpx.Response(200, json=routes[(r.method, r.url.path.removeprefix("/api"))]))
 
@@ -235,8 +241,10 @@ async def test_usage_is_measured_against_the_effective_limit(layers, grant, used
 
 
 async def test_a_report_is_judged_against_the_effective_limit():
-    # 12 against a grant of 10 and 20% allowance would be overage, at the hard ceiling.
-    a_kaiten_where(drivers(8, 15, EXCEPTION), grant=10, reported=drivers(12, 15, EXCEPTION))
+    # 12 against a grant of 10 and 20% allowance would be overage, at the hard ceiling. A report's
+    # answer names the idempotency key it was accepted under: none here.
+    reported = {**drivers(12, 15, EXCEPTION), "transactionId": None}
+    a_kaiten_where(drivers(8, 15, EXCEPTION), grant=10, reported=reported)
     result = await call(
         "kaiten_report_usage",
         instance="tako-prod",
@@ -256,13 +264,14 @@ async def test_a_report_is_judged_against_the_effective_limit():
 async def test_read_only_mode_registers_no_write_tool():
     async with Client(build(writes=False)) as c:
         tools = await c.list_tools()
-    assert tools and all(t.annotations.read_only_hint for t in tools)
+    assert len(tools) == 20
+    assert all(t.annotations.read_only_hint for t in tools)
 
 
 async def test_every_tool_declares_its_effect():
     async with Client(build(writes=True)) as c:
         tools = await c.list_tools()
-    assert len(tools) == 45
+    assert len(tools) == 46
     for t in tools:
         assert t.annotations.read_only_hint is not None, t.name
         assert t.description, t.name

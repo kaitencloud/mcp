@@ -53,7 +53,8 @@ How to work:
   license version, and kaiten_delete without confirm previews what a deletion touches.
 - Prefer a new license version (kaiten_save_license new_version_of=...) to editing a published version
   in place: editing changes every instance on it immediately.
-- Usage reports are not idempotent; never repeat one that answered.
+- A usage report is safe to repeat only with the same idempotency_key; without one, never repeat a report
+  that answered.
 """
 
 

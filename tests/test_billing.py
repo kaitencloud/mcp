@@ -342,13 +342,15 @@ def problem(status: int, code: str, detail: str = "refused") -> tuple[int, dict]
 
 
 def api(routes: dict):
-    """A Kaiten answering (method, path) with JSON, (status, JSON), or a function of the request.
-    Anything else is a 404. Returns every request it got."""
+    """A Kaiten answering (method, path) with JSON, (status, JSON), a whole httpx.Response, or a
+    function of the request. Anything else is a 404. Returns every request it got."""
 
     def handler(r: httpx.Request) -> httpx.Response:
         answer = routes.get((r.method, r.url.path.removeprefix("/api")))  # the SDK's /api prefix
         if callable(answer):
             answer = answer(r)
+        if isinstance(answer, httpx.Response):
+            return answer
         if answer is None:
             answer = problem(404, "Test.NotFound", f"{r.method} {r.url.path}")
         status, body = answer if isinstance(answer, tuple) else (200, answer)
