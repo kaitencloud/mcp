@@ -1,8 +1,9 @@
 # Copyright 2026 KAITEN INC
 # SPDX-License-Identifier: Apache-2.0
 
-"""Billing: what a License version costs, the subscription that bills an instance, its invoices,
-and the add-ons and vouchers on top of its License.
+"""Billing: what a License version costs, a plan's settings for selling it (its public listing, its
+fallback plan, how its trials end), the subscription that bills an instance, its invoices, and the
+add-ons and vouchers on top of its License.
 
 Kaiten composes every invoice, from the prices and the usage journal; Stripe, or the
 organization's own accounting system through the handoff queue, collects it. Billing is off until
@@ -52,6 +53,7 @@ from kaitencloud.types import (
     Price,
     Redemption,
     StartedSubscription,
+    TrialEndWithoutPaymentMethod,
     Voucher,
     VoucherDuration,
 )
@@ -76,7 +78,8 @@ BILLING_OFF: dict[BillingDisabledReason, str] = {
 def billing_off(reason: str | None) -> str:
     return (
         f"{BILLING_OFF.get(reason, 'Billing is off.')} Licenses, entitlements, usage and entitlement "
-        "exceptions work without it; prices, subscriptions, invoices, add-ons and vouchers need it."
+        "exceptions work without it; prices, a plan's public listing, fallback and trial settings, "
+        "subscriptions, invoices, add-ons and vouchers need it."
     )
 
 
@@ -713,6 +716,103 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 if failed and changes
                 else []
             ),
+        )
+
+    @mcp.tool(annotations=WRITE)
+    @_explained
+    async def kaiten_save_plan_settings(
+        plan: Annotated[str, Field(description="A plan (license family slug)")],
+        public: Annotated[
+            bool | None,
+            Field(
+                description="List the plan in the organization's public catalogue, which its website reads "
+                "with a publishable key: the plan's default version, once PUBLISHED, with its ACTIVE prices. "
+                "A plan is private until made public"
+            ),
+        ] = None,
+        fallback_plan: Annotated[
+            str | None,
+            Field(
+                description="A FREE plan, every version of it priced FREE, whose default version an instance "
+                "moves to when its subscription ends; '' for none"
+            ),
+        ] = None,
+        trial_end_without_payment_method: Annotated[
+            TrialEndWithoutPaymentMethod | None,
+            Field(
+                description="What a trial charged automatically becomes at its end when the customer has no "
+                "active payment method: CANCEL ends the subscription; CONVERT makes it ACTIVE, and its first "
+                "charge then fails"
+            ),
+        ] = None,
+        trial_reminder_days: Annotated[
+            int | None,
+            Field(
+                ge=1,
+                le=30,
+                description="How many days before a trial's end trial_will_end fires, for the trials "
+                "started after the change",
+            ),
+        ] = None,
+    ) -> dict:
+        """A plan's own settings, the same for every version of it: whether the organization's public catalogue
+        lists it, the FREE plan its instances fall back to when a subscription ends, and how its trials end. How
+        each version is sold (pricing, payment method, trial length) is the version's own: kaiten_save_license.
+        Only what you pass changes; asking for what is already set reports 'unchanged'. Scopes: write:licenses."""
+        families = sdk.kaiten().license_families
+        pslug = shapes.slug(plan, "plan")
+        # With its versions: a plan with nothing published yet is found too.
+        cur = await sdk.require(families.get(pslug, include_versions=True), f"plan {plan!r}")
+        asked = shapes.drop_none(
+            {
+                "is_public": public,
+                # "" removes the fallback, and is no slug.
+                "fallback_license_family_slug": shapes.slug(fallback_plan, "fallback_plan")
+                if fallback_plan
+                else fallback_plan,
+                "trial_end_without_payment_method": trial_end_without_payment_method,
+                "trial_reminder_days": trial_reminder_days,
+            }
+        )
+        held = {
+            "is_public": cur.is_public,
+            "fallback_license_family_slug": cur.fallback_license_family_slug or "",
+            "trial_end_without_payment_method": cur.trial_end_without_payment_method,
+            "trial_reminder_days": cur.trial_reminder_days,
+        }
+        # Only what differs is sent: a fallback restated would be checked again, and could be refused.
+        change = {key: value for key, value in asked.items() if value != held[key]}
+        after = await families.update(pslug, **change) if change else cur
+        settings = shapes.plan_settings(after)
+        notes: list[str] = []
+        if after.is_public:
+            listed = shapes.listed_version(after)
+            if listed is None:
+                notes.append(
+                    "not listed yet: the public catalogue offers a plan's default version only, once it is "
+                    "PUBLISHED; publish one and make it the default with kaiten_set_license_state"
+                )
+            else:
+                settings["listed_version"] = listed
+                if after.current_version.pricing_type == "CUSTOM":
+                    notes.append(
+                        f"{listed} is CUSTOM: the public catalogue offers it on request, through its "
+                        "self_serve_cta_url; pricing FREE or PAID (kaiten_save_license) sells it at checkout"
+                    )
+            # The console warns of the same gap: Kaiten refuses neither the setting nor the version.
+            paid = any(v.pricing_type == "PAID" for v in cur.versions or [])
+            if paid and not after.fallback_license_family_slug:
+                notes.append(
+                    f"{pslug} has a PAID version and no fallback plan: a subscription that ends keeps it "
+                    "unbilled, and a checkout with an amount due today is refused "
+                    "(CreateCheckoutSession.FallbackRequired); set fallback_plan to a FREE plan"
+                )
+        return shapes.report(
+            "updated" if change else "unchanged",
+            "plan_settings",
+            settings,
+            changes=shapes.changes(shapes.plan_settings(cur), shapes.plan_settings(after)),
+            notes=notes,
         )
 
     @mcp.tool(annotations={**WRITE, "idempotentHint": False})

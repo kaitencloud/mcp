@@ -212,8 +212,36 @@ def license_(lic: Any, plan: str | None = None) -> dict:
             "state": lic.lifecycle_state,
             "is_default": lic.is_default,
             "description": lic.description or None,
+            # How the version is sold. CUSTOM, a new plan's default, is never sold self-serve.
+            "pricing": lic.pricing_type,
+            "requires_payment_method": lic.requires_payment_method,
+            "trial_days": lic.trial_period_days,
+            "self_serve_cta_url": lic.self_serve_cta_url,
         }
     )
+
+
+def plan_settings(f: Any) -> dict:
+    """A plan's own settings: its License family's, the same for every version of it."""
+    return drop_none(
+        {
+            "plan": f.slug,
+            "public": f.is_public,
+            "fallback_plan": f.fallback_license_family_slug,
+            "trial_end_without_payment_method": f.trial_end_without_payment_method,
+            "trial_reminder_days": f.trial_reminder_days,
+        }
+    )
+
+
+def listed_version(f: Any) -> str | None:
+    """The version a public plan's public catalogue offers: its default, which Kaiten keeps PUBLISHED.
+
+    None when the plan is private or has no default. The plan's current version is no guide on its
+    own: without a default it is the highest PUBLISHED version, which the catalogue does not list.
+    """
+    current = f.current_version
+    return current.slug if f.is_public and current is not None and current.is_default else None
 
 
 def entitlement(e: Any) -> dict:
