@@ -11,7 +11,9 @@ All notable changes to this project are documented here. The format follows
 - `kaiten_save_plan_settings`, a billing tool for a plan's own settings: whether the organization's public
   catalogue lists it, the FREE plan its instances fall back to when a subscription ends, what a trial without
   a payment method becomes at its end, and how many days before a trial's end its reminder fires. Its answer
-  names the version the public catalogue offers, or why it offers none. The server goes from 44 to 45 tools.
+  names the version the public catalogue offers, or why it offers none, and warns of a public plan with a
+  PAID version and no fallback plan, as the console does. `kaiten_get_catalog` says whether each public plan
+  is listed. The server goes from 44 to 45 tools.
 - `kaiten_save_license` sets how a version is sold: `pricing` (FREE, PAID or CUSTOM),
   `requires_payment_method`, `trial_days` and `self_serve_cta_url`. `kaiten_get_catalog` shows them on each
   version, with each plan's public listing and fallback plan, and with a plan, all of its settings.
@@ -84,5 +86,6 @@ of the Kaiten API into a tool of its own, which was never released.
 - The package on PyPI, [`kaitencloud-mcp`](https://pypi.org/project/kaitencloud-mcp/), and the image
   `ghcr.io/kaitencloud/kaiten-mcp`.
 
+[Unreleased]: https://github.com/kaitencloud/mcp/compare/v0.3.0...HEAD
 [0.3.0]: https://github.com/kaitencloud/mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kaitencloud/mcp/releases/tag/v0.2.0

@@ -179,10 +179,11 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         ] = None,
     ) -> dict:
         """What the organization sells. Without a plan: the entitlement catalog (with groups) and every plan's
-        current version with its grants, as a plan comparison, each plan saying whether the public catalogue
-        lists it. With a plan: its settings (public listing, fallback plan, how its trials end) and its
-        versions, oldest first, each with its lifecycle state, how it is sold, the instances on it, and its
-        grants."""
+        current version with its grants, as a plan comparison; a public plan says whether its public catalogue
+        lists it, which takes a default version: without one, the current version is the highest PUBLISHED one,
+        and nothing is listed. With a plan: its settings (public listing and the version listed, fallback plan,
+        how its trials end) and its versions, oldest first, each with its lifecycle state, how it is sold, the
+        instances on it, and its grants."""
         k = sdk.kaiten()
         instances = await k.instances.list()
         if plan:
@@ -193,6 +194,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             versions = sorted(fam.versions or [], key=lambda v: int(v.version))
             return {
                 **shapes.plan_settings(fam),
+                **({"listed_version": shapes.listed_version(fam)} if fam.is_public else {}),
                 "current_version": fam.current_version.slug if fam.current_version else None,
                 "versions": await views.gather_bounded(
                     _version_view(v, instances, list_instances=True, plan=fam.slug)
@@ -216,6 +218,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                     {
                         "plan": f.slug,
                         "public": f.is_public,
+                        "listed": shapes.listed_version(f) is not None if f.is_public else None,
                         "fallback_plan": f.fallback_license_family_slug,
                         "versions": f.version_count,
                         "current": by_family.get(f.slug),
@@ -398,8 +401,11 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         self_serve_cta_url: Annotated[
             str | None,
             Field(
+                # Kaiten's own check, ^https?://\S+$ up to 2048 characters, and "" to remove it.
+                max_length=2048,
+                pattern=r"^(https?://\S+)?$",
                 description="Where a buyer is sent when the version cannot be bought self-serve, e.g. a "
-                "contact-sales page: an http(s) URL, '' for none. A new version keeps the plan's"
+                "contact-sales page: an http(s) URL, '' for none. A new version keeps the plan's",
             ),
         ] = None,
         grants: GrantSpec = None,
@@ -419,7 +425,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
           the answer lists them.
         Grants not mentioned are kept; null removes one. pricing, requires_payment_method, trial_days and
         self_serve_cta_url are the version's own; a plan's public listing and fallback plan are set with
-        kaiten_save_plan_settings, and its prices with kaiten_save_prices. Scopes: write:licenses."""
+        kaiten_save_plan_settings, and its prices with kaiten_save_prices. Scopes: write:licenses and
+        read:entitlements, with read:instances to edit a version in place."""
         if license and new_version_of:
             raise ToolError(
                 "Pass license (edit a version) or new_version_of (add a version), not both."
@@ -593,8 +600,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             notes.append(f"{plan} is public: its public catalogue now offers {lslug}")
         elif fam and fam.is_public and action == "unset_default":
             notes.append(
-                f"{plan} is public, but its public catalogue lists a default version only: it lists "
-                f"{plan} again once another version is made the default"
+                f"{plan} is no longer in its public catalogue, which lists a plan's default version only: "
+                "make a version the default to list it again"
             )
         return shapes.report(
             "updated",

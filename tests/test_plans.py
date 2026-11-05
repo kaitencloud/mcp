@@ -38,8 +38,12 @@ def version(slug: str, **extra) -> dict:
 
 
 def family(*versions: dict, **extra) -> dict:
-    """The growth plan, as GET /license-families/growth?include=versions answers it."""
-    default = next((v for v in versions if v["isDefault"]), None)
+    """The growth plan, as GET /license-families/growth?include=versions answers it. Like Kaiten, it
+    resolves to its default version, and without one to its highest PUBLISHED version."""
+    published = [v for v in versions if v["lifecycleState"] == "PUBLISHED"]
+    current = next((v for v in versions if v["isDefault"]), None) or max(
+        published, key=lambda v: int(v["version"]), default=None
+    )
     return {
         "id": "f1",
         "slug": "growth",
@@ -48,7 +52,7 @@ def family(*versions: dict, **extra) -> dict:
         "fallbackLicenseFamilySlug": None,
         "trialEndWithoutPaymentMethod": "CANCEL",
         "trialReminderDays": 3,
-        **({"currentVersion": default} if default else {}),
+        **({"currentVersion": current} if current else {}),
         "versions": list(versions),
         **STAMPS,
         **extra,
@@ -62,17 +66,19 @@ async def test_a_new_version_is_sold_as_the_version_it_comes_from():
     # Left to the API's default, a new version would be CUSTOM: a plan whose default it became would stop
     # selling at checkout, and a plan another one falls back to refuses it.
     v1 = version("growth", isDefault=True, **SOLD)
+    # The highest version is a draft sold otherwise: the copy is of the version the plan serves.
+    v2 = version("growth-v2", version="2", lifecycleState="DRAFT")
 
     def create(r):
         body = json.loads(r.content)
-        return 201, version("growth-v2", version="2", **{k: body.get(k) for k in SOLD})
+        return 201, version("growth-v3", version="3", **{k: body.get(k) for k in SOLD})
 
     seen = api(
         {
-            ("GET", "/license-families/growth"): family(v1),
+            ("GET", "/license-families/growth"): family(v1, v2),
             ("POST", "/licenses"): create,
             ("GET", "/licenses/growth/entitlements"): [],
-            ("GET", "/licenses/growth-v2/entitlements"): [],
+            ("GET", "/licenses/growth-v3/entitlements"): [],
             ("GET", "/entitlements"): [],
         }
     )
@@ -110,9 +116,16 @@ async def test_a_new_plan_is_sold_as_asked_and_custom_otherwise():
         }
     )
     free = await call(
-        "kaiten_save_license", name="Starter", type="COMMUNITY", slug="starter", pricing="FREE"
+        "kaiten_save_license",
+        name="Starter",
+        type="COMMUNITY",
+        slug="starter",
+        pricing="FREE",
+        trial_days=0,
     )
-    assert sent(seen, "POST", "licenses")[-1]["pricingType"] == "FREE"
+    body = sent(seen, "POST", "licenses")[-1]
+    # A 0-day trial is none, and is not sent: Kaiten refuses it on a new version (InvalidTrialDays).
+    assert body["pricingType"] == "FREE" and "trialPeriodDays" not in body
     assert free.structured_content["license"]["pricing"] == "FREE"
     assert free.structured_content["notes"][0].startswith("it has no price yet")
 
@@ -169,6 +182,48 @@ async def test_a_version_changes_how_it_is_sold_in_place_and_reports_it():
     assert len(sent(seen, "PUT", "licenses/growth")) == 1
 
 
+async def test_a_trial_and_a_url_held_are_removed_in_place():
+    state = version("growth", trialPeriodDays=14, selfServeCtaUrl="https://example.com/sales")
+
+    def replace(r):
+        body = json.loads(r.content)
+        state.update(body)
+        # Kaiten clears the trial on 0 and the URL on "", and stores neither.
+        state["trialPeriodDays"] = body.get("trialPeriodDays", state["trialPeriodDays"]) or None
+        state["selfServeCtaUrl"] = body.get("selfServeCtaUrl", state["selfServeCtaUrl"]) or None
+        return 204, None
+
+    seen = api(
+        {
+            ("GET", "/licenses/growth"): lambda r: state,
+            ("PUT", "/licenses/growth"): replace,
+            ("GET", "/licenses/growth/entitlements"): [],
+            ("GET", "/entitlements"): [],
+            ("GET", "/license-families"): [family(state)],
+            ("GET", "/instances"): [],
+        }
+    )
+    out = (
+        await call("kaiten_save_license", license="growth", trial_days=0, self_serve_cta_url="")
+    ).structured_content
+    # What clears is sent as such: as None, the SDK would leave it out, and Kaiten would keep both.
+    put = sent(seen, "PUT", "licenses/growth")[0]
+    assert (put["trialPeriodDays"], put["selfServeCtaUrl"]) == (0, "")
+    assert out["changes"] == {
+        "self_serve_cta_url": {"from": "https://example.com/sales", "to": None},
+        "trial_days": {"from": 14, "to": None},
+    }
+
+
+async def test_a_contact_url_kaiten_would_refuse_is_refused_before_any_call():
+    seen = api({})
+    refused = await call(
+        "kaiten_save_license", license="growth", self_serve_cta_url="mailto:sales@example.com"
+    )
+    assert refused.is_error and "self_serve_cta_url" in refused.content[0].text
+    assert seen == []
+
+
 def a_plan(state: dict):
     """The growth plan at state, whose PATCH merges what it is sent and answers as Kaiten does,
     without the versions."""
@@ -205,6 +260,8 @@ async def test_plan_settings_send_only_what_differs():
         "public": {"from": False, "to": True},
         "fallback_plan": {"from": None, "to": "starter"},
     }
+    # Without include=versions, Kaiten answers 404 for a plan with nothing published.
+    assert seen[0].url.params["include"] == "versions"
     # The reminder is already 3 days, and a fallback restated would be checked again: neither is sent.
     assert sent(seen, "PATCH", "license-families/growth") == [
         {"isPublic": True, "fallbackLicenseFamilySlug": "starter"}
@@ -216,22 +273,31 @@ async def test_plan_settings_send_only_what_differs():
     assert same.structured_content["status"] == "unchanged"
     assert len(sent(seen, "PATCH", "license-families/growth")) == 1
 
-    # "" removes the fallback.
+    # "" removes the fallback, which leaves this public PAID plan with the gap the console warns of.
     out = (
         await call("kaiten_save_plan_settings", plan="growth", fallback_plan="")
     ).structured_content
     assert sent(seen, "PATCH", "license-families/growth")[-1] == {"fallbackLicenseFamilySlug": ""}
     assert out["changes"] == {"fallback_plan": {"from": "starter", "to": None}}
+    assert [n.split(":")[0] for n in out["notes"]] == [
+        "growth has a PAID version and no fallback plan"
+    ]
 
 
 @pytest.mark.parametrize(
     ("versions", "listed", "note"),
     [
+        # Its current version is the PUBLISHED one, which the public catalogue does not list.
         ([version("growth", **SOLD)], None, "not listed yet"),
         ([version("growth", lifecycleState="DRAFT", **SOLD)], None, "not listed yet"),
         ([version("growth", isDefault=True)], "growth", "growth is CUSTOM"),
+        (
+            [version("growth", isDefault=True, **SOLD)],
+            "growth",
+            "growth has a PAID version and no fallback plan",
+        ),
     ],
-    ids=["no default version", "nothing published", "sold on request"],
+    ids=["no default version", "nothing published", "sold on request", "no fallback"],
 )
 async def test_a_plan_made_public_says_what_its_catalogue_lists(versions, listed, note):
     a_plan(family(*versions))
@@ -254,28 +320,36 @@ async def test_plan_settings_where_billing_is_off_are_explained():
     )
     refused = await call("kaiten_save_plan_settings", plan="growth", public=True)
     assert refused.is_error
-    assert "KAITEN_BILLING_ENABLED" in refused.content[0].text
-    assert refused.content[0].text.endswith("(Billing.Disabled)")
+    why = refused.content[0].text
+    assert "KAITEN_BILLING_ENABLED" in why and why.endswith("(Billing.Disabled)")
+    assert "a plan's public listing, fallback and trial settings" in why.split("work without it")[1]
     assert len(sent(seen, "PATCH", "license-families/growth")) == 1
 
 
 async def test_the_catalog_shows_how_each_plan_is_sold():
     v1 = version("growth", isDefault=True, selfServeCtaUrl="https://example.com/sales", **SOLD)
     growth = family(v1, isPublic=True, fallbackLicenseFamilySlug="starter")
+    # Public, and served, but with no default version: its public catalogue lists nothing.
+    starter = family(version("starter"), id="f2", slug="starter", isPublic=True)
+    private = family(version("kaiten", isDefault=True), id="f3", slug="kaiten")
     api(
         {
             ("GET", "/instances"): [],
             ("GET", "/license-families/growth"): growth,
             ("GET", "/licenses/growth/entitlements"): [],
+            ("GET", "/licenses/starter/entitlements"): [],
+            ("GET", "/licenses/kaiten/entitlements"): [],
             ("GET", "/entitlements"): [],
             ("GET", "/entitlement-groups"): [],
-            ("GET", "/license-families"): [growth],
+            ("GET", "/license-families"): [growth, starter, private],
         }
     )
     one = (await call("kaiten_get_catalog", plan="growth")).structured_content
-    assert {k: one[k] for k in ("plan", "public", "fallback_plan", "trial_reminder_days")} == {
+    shown = ("plan", "public", "listed_version", "fallback_plan", "trial_reminder_days")
+    assert {k: one[k] for k in shown} == {
         "plan": "growth",
         "public": True,
+        "listed_version": "growth",
         "fallback_plan": "starter",
         "trial_reminder_days": 3,
     }
@@ -284,18 +358,20 @@ async def test_the_catalog_shows_how_each_plan_is_sold():
     assert one["versions"][0]["self_serve_cta_url"] == "https://example.com/sales"
 
     plans = (await call("kaiten_get_catalog")).structured_content["plans"]
-    assert {k: plans[0][k] for k in ("plan", "public", "fallback_plan")} == {
-        "plan": "growth",
-        "public": True,
-        "fallback_plan": "starter",
-    }
+    listing = [{k: p.get(k) for k in ("plan", "public", "listed", "fallback_plan")} for p in plans]
+    assert listing == [
+        {"plan": "growth", "public": True, "listed": True, "fallback_plan": "starter"},
+        {"plan": "starter", "public": True, "listed": False, "fallback_plan": None},
+        {"plan": "kaiten", "public": False, "listed": None, "fallback_plan": None},
+    ]
+    assert plans[1]["current"]["slug"] == "starter"  # served all the same
 
 
 @pytest.mark.parametrize(
     ("action", "default", "note"),
     [
         ("make_default", False, "growth is public: its public catalogue now offers growth-v2"),
-        ("unset_default", True, "growth is public, but its public catalogue lists a default"),
+        ("unset_default", True, "growth is no longer in its public catalogue"),
     ],
 )
 async def test_moving_the_default_of_a_public_plan_says_what_its_catalogue_offers(

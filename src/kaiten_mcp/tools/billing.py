@@ -78,7 +78,8 @@ BILLING_OFF: dict[BillingDisabledReason, str] = {
 def billing_off(reason: str | None) -> str:
     return (
         f"{BILLING_OFF.get(reason, 'Billing is off.')} Licenses, entitlements, usage and entitlement "
-        "exceptions work without it; prices, subscriptions, invoices, add-ons and vouchers need it."
+        "exceptions work without it; prices, a plan's public listing, fallback and trial settings, "
+        "subscriptions, invoices, add-ons and vouchers need it."
     )
 
 
@@ -785,26 +786,27 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         settings = shapes.plan_settings(after)
         notes: list[str] = []
         if after.is_public:
-            listed = next(
-                (
-                    v
-                    for v in cur.versions or []
-                    if v.is_default and v.lifecycle_state == "PUBLISHED"
-                ),
-                None,
-            )
+            listed = shapes.listed_version(after)
             if listed is None:
                 notes.append(
                     "not listed yet: the public catalogue offers a plan's default version only, once it is "
                     "PUBLISHED; publish one and make it the default with kaiten_set_license_state"
                 )
             else:
-                settings["listed_version"] = listed.slug
-                if listed.pricing_type == "CUSTOM":
+                settings["listed_version"] = listed
+                if after.current_version.pricing_type == "CUSTOM":
                     notes.append(
-                        f"{listed.slug} is CUSTOM: the public catalogue offers it on request, through its "
+                        f"{listed} is CUSTOM: the public catalogue offers it on request, through its "
                         "self_serve_cta_url; pricing FREE or PAID (kaiten_save_license) sells it at checkout"
                     )
+            # The console warns of the same gap: Kaiten refuses neither the setting nor the version.
+            paid = any(v.pricing_type == "PAID" for v in cur.versions or [])
+            if paid and not after.fallback_license_family_slug:
+                notes.append(
+                    f"{pslug} has a PAID version and no fallback plan: a subscription that ends keeps it "
+                    "unbilled, and a checkout with an amount due today is refused "
+                    "(CreateCheckoutSession.FallbackRequired); set fallback_plan to a FREE plan"
+                )
         return shapes.report(
             "updated" if change else "unchanged",
             "plan_settings",

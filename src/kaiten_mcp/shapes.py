@@ -234,6 +234,16 @@ def plan_settings(f: Any) -> dict:
     )
 
 
+def listed_version(f: Any) -> str | None:
+    """The version a public plan's public catalogue offers: its default, which Kaiten keeps PUBLISHED.
+
+    None when the plan is private or has no default. The plan's current version is no guide on its
+    own: without a default it is the highest PUBLISHED version, which the catalogue does not list.
+    """
+    current = f.current_version
+    return current.slug if f.is_public and current is not None and current.is_default else None
+
+
 def entitlement(e: Any) -> dict:
     return drop_none(
         {
