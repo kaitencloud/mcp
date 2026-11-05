@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **44 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **45 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -53,7 +53,7 @@ Kaiten's contract.
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` | `kaiten_report_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
-| Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
+| Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_save_plan_settings` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
 | Access & audit | `kaiten_get_access` · `kaiten_get_audit_trail` | `kaiten_issue_token` · `kaiten_revoke_token` |
@@ -64,6 +64,13 @@ Kaiten's contract.
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
 In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
 `license` an exact License version.
+
+How a version is sold is the version's own, and `kaiten_save_license` sets it with or without billing:
+`pricing` (FREE and PAID can be bought self-serve; CUSTOM, a new plan's default, sends a buyer to its
+`self_serve_cta_url`), `requires_payment_method` and `trial_days`. A new version is sold as the one it is
+made from. What a plan does across its versions — whether the public catalogue lists it, the FREE plan its
+instances fall back to when a subscription ends, how its trials end — is set with `kaiten_save_plan_settings`,
+a billing tool. The public catalogue offers a public plan's default version only, once it is published.
 
 The billing tools need billing to be on for the organization: `kaiten_get_billing` says whether it is, and
 why not, and the others answer with that explanation rather than a bare 403. A voucher's code is a secret:
@@ -77,6 +84,7 @@ its description:
 | `kaiten_get_prices` | `read:licenses` |
 | `kaiten_get_invoices` | `read:billing` |
 | `kaiten_save_prices` | `write:licenses` |
+| `kaiten_save_plan_settings` | `write:licenses` |
 | `kaiten_subscribe_instance` | `write:billing`, `read:instances`, `read:licenses` |
 | `kaiten_cancel_subscription` | `write:billing`, `read:instances` |
 | `kaiten_set_instance_addon` | `write:instances` |
