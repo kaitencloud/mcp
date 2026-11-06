@@ -1,6 +1,6 @@
 [project]
 name = "kaitencloud-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Kaiten MCP server: intent-level tools over the Kaiten API for AI agents"
 readme = "README.md"
 keywords = ["kaiten", "mcp", "model-context-protocol", "ai-agents"]

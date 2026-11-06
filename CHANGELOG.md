@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-06
+
 ### Added
 
 - `kaiten_save_plan_settings`, a billing tool for a plan's own settings: whether the organization's public
@@ -107,6 +109,7 @@ of the Kaiten API into a tool of its own, which was never released.
 - The package on PyPI, [`kaitencloud-mcp`](https://pypi.org/project/kaitencloud-mcp/), and the image
   `ghcr.io/kaitencloud/kaiten-mcp`.
 
-[Unreleased]: https://github.com/kaitencloud/mcp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/kaitencloud/mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kaitencloud/mcp/releases/tag/v0.4.0
 [0.3.0]: https://github.com/kaitencloud/mcp/releases/tag/v0.3.0
 [0.2.0]: https://github.com/kaitencloud/mcp/releases/tag/v0.2.0
