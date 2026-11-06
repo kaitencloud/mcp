@@ -29,6 +29,27 @@ def _field(f: Any) -> dict:
     )
 
 
+async def _place(field: Any, position: int) -> tuple[Any, dict[str, dict[str, int]]]:
+    """Put an active field at position among its resource type's active fields, 0 first.
+
+    Kaiten lists them by stored order, then by creation. A field created without an order is at 0, so
+    an archive and a re-create can leave two at 0: the order is rewritten whole, and only when a field
+    is not at its index. Returns the field as it now stands, and where each field that moved went.
+    """
+    k = sdk.kaiten()
+    others = [f for f in await k.metadata_fields.list(field.resource_type) if f.id != field.id]
+    at = min(position, len(others))
+    order = [*others[:at], field, *others[at:]]
+    moved = {
+        f.key: {"from": f.display_order, "to": i}
+        for i, f in enumerate(order)
+        if f.display_order != i
+    }
+    if moved:
+        await k.metadata_fields.reorder([f.id for f in order])
+    return field.model_copy(update={"display_order": at}), moved
+
+
 def register(mcp: FastMCP, *, writes: bool) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_get_metadata_fields(
@@ -93,10 +114,20 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 description="Apply a schema change even when existing values would stop validating"
             ),
         ] = False,
+        position: Annotated[
+            int | None,
+            Field(
+                ge=0,
+                description="Where it is shown among the resource type's active fields: 0 first, past the end last",
+            ),
+        ] = None,
     ) -> dict:
-        """Define a typed metadata field, or change its label, schema or archived state. A schema change is first
-        dry-run against every stored value: if any would stop validating it is refused (status 'rejected', with
-        samples) unless force is set."""
+        """Define a typed metadata field, or change its label, schema, archived state or position. A schema change
+        is first dry-run against every stored value: if any would stop validating it is refused (status 'rejected',
+        with samples) unless force is set. position rewrites the order of the resource type's fields only when one
+        of them is not at its place, and changes.order says which moved."""
+        if position is not None and archived:
+            raise ToolError("An archived field has no position: pass position, or archived=true.")
         k = sdk.kaiten()
         fields = [f for f in await k.metadata_fields.list(resource_type) if f.key == key]
         cur = next((f for f in fields if not f.archived_at), fields[0] if fields else None)
@@ -108,7 +139,15 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             created = await k.metadata_fields.create(
                 resource_type=resource_type, key=key, label=label, json_schema=json_schema
             )
-            return shapes.report("created", "metadata_field", _field(created))
+            moved = {}
+            if position is not None:
+                created, moved = await _place(created, position)
+            return shapes.report(
+                "created",
+                "metadata_field",
+                _field(created),
+                changes={"order": moved} if moved else None,
+            )
 
         new_label = cur.label if label is None else label
         new_schema = cur.json_schema if json_schema is None else json_schema
@@ -140,7 +179,12 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             after = await (k.metadata_fields.archive if archived else k.metadata_fields.unarchive)(
                 cur.id
             )
+        moved = {}
+        if position is not None:
+            after, moved = await _place(after, position)
         diff = shapes.changes(_field(cur), _field(after))
+        if moved:
+            diff["order"] = moved
         return shapes.report(
             "updated" if diff else "unchanged", "metadata_field", _field(after), changes=diff
         )

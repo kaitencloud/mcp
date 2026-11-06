@@ -20,6 +20,7 @@ from fastmcp.exceptions import ToolError
 from kaitencloud import usage as enforcement
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 UNLIMITED = enforcement.UNLIMITED
 METERED = ("NUMBER", "NUMBER_AI_CREDIT")
 
@@ -30,6 +31,16 @@ def slug(value: str, what: str = "slug") -> str:
         raise ToolError(
             f"{what} {value!r} is not a Kaiten slug: lowercase letters, digits and dashes, "
             "2-100 characters, starting and ending with a letter or digit."
+        )
+    return value
+
+
+def idempotency_key(value: str) -> str:
+    """A usage report's idempotency key. Kaiten matches it exactly, so it is never trimmed."""
+    if not IDEMPOTENCY_KEY.fullmatch(value):
+        raise ToolError(
+            f"idempotency_key {value!r} is not a Kaiten idempotency key: 1 to 128 letters, digits, "
+            "'.', '_', ':' or '-', e.g. 'llm-call-9f2c:tokens'."
         )
     return value
 
@@ -115,7 +126,14 @@ def usage_state(
     if limit is None:
         return {"used": used, "limit": None, "state": "not_granted"}
     if enforcement.is_unlimited(limit) or overage_percent == UNLIMITED:
-        return {"used": used, "limit": "unlimited", "state": "unlimited"}
+        # The numbers behind it, as Kaiten gives them: -1 and -1.
+        return {
+            "used": used,
+            "limit": "unlimited",
+            "raw_limit": limit,
+            "overage_percent": overage_percent,
+            "state": "unlimited",
+        }
     out: dict[str, Any] = {"used": used, "limit": limit}
     pct = enforcement.percentage_used(limit, used)
     out["percent"] = round(pct, 1) if pct is not None else None
@@ -160,6 +178,13 @@ def effective_usage(u: Any, warning_percent: int | None = None) -> dict[str, Any
     return out
 
 
+def window(u: Any) -> dict[str, str]:
+    """The usage window a usage read or report counts in; none for a lifetime counter."""
+    return drop_none(
+        {"period_start": iso(u.current_period_start), "resets_at": iso(u.current_period_end)}
+    )
+
+
 ATTENTION_STATES = {"warning", "at_limit", "overage", "over"}
 
 
@@ -173,6 +198,7 @@ def customer(c: Any) -> dict:
             "name": c.name,
             "domain": c.domain,
             "external_customer_id": c.external_customer_id,
+            "billing_email": c.billing_email,
             "integrations": {
                 k: getattr(v, "external_id", v) for k, v in (c.integrations or {}).items()
             }
@@ -272,7 +298,8 @@ def grant(g: Any) -> dict:
     pct = g.limit_cap_exceeded_overage_percent
     if g.entitlement_type in METERED:
         if enforcement.is_unlimited(value):
-            out["value"] = "unlimited"
+            # The numbers Kaiten stores for it, as it stores them: -1 and -1.
+            out.update(value="unlimited", raw_value=value, overage_percent=pct)
         elif enforcement.is_soft_limit(value, pct):
             out["overage_percent"] = pct
         else:
@@ -300,6 +327,22 @@ def release(r: Any) -> dict:
             "description": r.description or None,
             "created_at": iso(r.created_at),
             "components": [f"{c.name}@{c.version}" for c in r.components or []] or None,
+        }
+    )
+
+
+def usage_report(r: Any) -> dict:
+    """A report Kaiten accepted, as its usage history keeps it: the numbers are its exact decimals."""
+    return drop_none(
+        {
+            "at": iso(r.reported_at),
+            "behavior": r.behavior,
+            "amount": r.reported_value,
+            "before": r.value_before,
+            "after": r.value_after,
+            "limit": "unlimited" if r.limit_value is None else r.limit_value,
+            "transaction_id": r.transaction_id,
+            "metadata": r.properties,
         }
     )
 

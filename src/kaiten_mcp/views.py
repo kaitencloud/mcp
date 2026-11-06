@@ -97,8 +97,7 @@ def entitlements_view(snap: Snapshot, inst: Any) -> dict[str, Any]:
             }
             if definition and (definition.unit_plural or definition.unit_singular):
                 row["unit"] = definition.unit_plural or definition.unit_singular
-            if u.current_period_end:
-                row["resets_at"] = shapes.iso(u.current_period_end)
+            row.update(shapes.window(u))
             limits.append(row)
         elif u.value.type == "boolean":
             features[slug_] = shapes.plain(u.value)

@@ -64,8 +64,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         ] = 5,
     ) -> dict:
         """Everything about one instance: its customer, license version and plan, deployment zone and the release
-        running there, usage against each limit (with reset dates), entitled features and config, what needs
-        attention, and its most recent audit events."""
+        running there, usage against each limit (with its window's start and reset date), entitled features and
+        config, what needs attention, and its most recent audit events."""
         k = sdk.kaiten()
         inst = await views.instance(instance)
         snap = await views.snapshot([inst])
@@ -177,6 +177,13 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             str | None,
             Field(description="The id your CRM or billing system uses for this customer"),
         ] = None,
+        billing_email: Annotated[
+            str | None,
+            Field(
+                description="Where invoices sent to the customer go: Stripe needs one to send them "
+                "(SEND_INVOICE collection). '' removes it"
+            ),
+        ] = None,
     ) -> dict:
         """Create a customer, or update the fields you pass on an existing one (others are kept).
         Reports created / updated / unchanged, and exactly which fields changed."""
@@ -187,7 +194,11 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             if not name:
                 raise ToolError(f"Customer {cslug!r} does not exist yet: pass a name to create it.")
             created = await k.customers.create(
-                name=name, slug=cslug, domain=domain, external_customer_id=external_customer_id
+                name=name,
+                slug=cslug,
+                domain=domain,
+                external_customer_id=external_customer_id,
+                billing_email=billing_email,
             )
             return shapes.report("created", "customer", shapes.customer(created))
         wanted = {
@@ -197,13 +208,16 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             if external_customer_id is None
             else external_customer_id,
         }
-        if wanted == {
+        # Kaiten keeps the billing e-mail an update leaves out, and removes it for "": it is sent
+        # only when given, and this is the address Kaiten holds afterwards.
+        email = cur.billing_email if billing_email is None else billing_email or None
+        if email == cur.billing_email and wanted == {
             "name": cur.name,
             "domain": cur.domain,
             "external_customer_id": cur.external_customer_id,
         }:
             return shapes.report("unchanged", "customer", shapes.customer(cur))
-        await k.customers.update(cslug, **wanted)
+        await k.customers.update(cslug, **wanted, billing_email=billing_email)
         after = await k.customers.get(cslug)
         diff = shapes.changes(shapes.customer(cur), shapes.customer(after))
         return shapes.report(

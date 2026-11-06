@@ -16,7 +16,7 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **45 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **46 tools**, each an intent, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -35,7 +35,7 @@ rules in Kaiten's product vision for agent-readiness:
   version is edited in place, the zone's instances when a release is deployed), and `kaiten_delete` previews
   its blast radius until called with `confirm=true`.
 - **An agent's blast radius is its principal's.** Each request carries the caller's own Kaiten token; the
-  server has no credential of its own. `KAITEN_MCP_READ_ONLY=true` registers the read tools only.
+  server has no credential of its own. `KAITEN_MCP_READ_ONLY=true` registers the 20 read tools only.
 
 There is no API contract in this repository. Every call goes through the official
 [Python SDK](https://github.com/kaitencloud/sdk-python) (`kaitencloud`), generated from Kaiten's OpenAPI
@@ -51,7 +51,7 @@ Kaiten's contract.
 | --- | --- | --- |
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
-| Usage | `kaiten_get_usage` | `kaiten_report_usage` |
+| Usage | `kaiten_get_usage` · `kaiten_get_usage_reports` | `kaiten_report_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
 | Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_save_plan_settings` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
@@ -71,6 +71,9 @@ How a version is sold is the version's own, and `kaiten_save_license` sets it wi
 made from. What a plan does across its versions — whether the public catalogue lists it, the FREE plan its
 instances fall back to when a subscription ends, how its trials end — is set with `kaiten_save_plan_settings`,
 a billing tool. The public catalogue offers a public plan's default version only, once it is published.
+
+A customer's billing e-mail is where invoices sent to it go: `kaiten_get_customer` shows it, and
+`kaiten_save_customer` sets it, or removes it with `""`. Stripe needs one to send an invoice (`SEND_INVOICE`).
 
 The billing tools need billing to be on for the organization: `kaiten_get_billing` says whether it is, and
 why not, and the others answer with that explanation rather than a bare 403. A voucher's code is a secret:

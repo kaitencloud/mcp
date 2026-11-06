@@ -17,11 +17,32 @@ All notable changes to this project are documented here. The format follows
 - `kaiten_save_license` sets how a version is sold: `pricing` (FREE, PAID or CUSTOM),
   `requires_payment_method`, `trial_days` and `self_serve_cta_url`. `kaiten_get_catalog` shows them on each
   version, with each plan's public listing and fallback plan, and with a plan, all of its settings.
+- `kaiten_report_usage` takes an `idempotency_key`, sent as the report's `Idempotency-Key`. A report repeated
+  under the same key, behavior and amount counts nothing again, and answers `unchanged` and `replayed`; a key
+  already spent on a report of another behavior or amount answers `rejected`. The answer carries the
+  `transaction_id` Kaiten recorded and `replayed`, and says when Kaiten did not store metadata over 4 KiB.
+- `kaiten_get_usage_reports`, a read tool: the reports Kaiten accepted for an instance's entitlement, newest
+  first, or the one sent under an `idempotency_key`. The server goes from 45 to 46 tools, and read-only mode
+  from 19 to 20.
+- Usage shows when its window started, `period_start`, next to `resets_at`, in `kaiten_get_instance`,
+  `kaiten_get_usage` and `kaiten_report_usage`'s answer: a BILLING_PERIOD window can be checked against the
+  subscription's period.
+- `kaiten_save_metadata_field` takes a `position` among the resource type's active fields, 0 first. It
+  rewrites their order only when a field is not at its place, which also separates the fields an archive and
+  a re-create left at the same position, and `changes.order` says which moved.
+- An unlimited NUMBER grant shows the values Kaiten stores next to `"unlimited"`: `raw_value` and
+  `overage_percent`, -1 and -1, in `kaiten_get_catalog` and `kaiten_save_license`'s answers. Usage measured
+  against an unlimited limit shows `raw_limit` and `overage_percent`.
+- `kaiten_get_customer` shows a customer's `billing_email`, where invoices sent to it go, and
+  `kaiten_save_customer` sets it: Stripe needs one to send an invoice (`SEND_INVOICE`). Left out, it is kept,
+  and `""` removes it.
 
 ### Changed
 
 - `kaiten_set_license_state` says when moving a public plan's default version changes what its public
   catalogue offers, or takes the plan out of it.
+- The server's instructions: a usage report is safe to repeat only with the same `idempotency_key`; without
+  one, never repeat a report that answered.
 
 ### Fixed
 
