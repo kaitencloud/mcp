@@ -18,8 +18,21 @@ from test_tools import kaiten
 from kaiten_mcp import config, sdk, server, views
 from kaiten_mcp.tools.catalog import _prepare_grants
 
-AI_READS = {"kaiten_get_ai_models", "kaiten_get_ai_rules", "kaiten_get_ai_history"}
-AI_WRITES = {"kaiten_save_ai_model", "kaiten_save_ai_rule", "kaiten_report_ai_usage"}
+AI_READS = {
+    "kaiten_get_ai_models",
+    "kaiten_get_ai_rules",
+    "kaiten_get_ai_history",
+    "kaiten_list_ai_inferences",
+    "kaiten_explain_ai_charge",
+    "kaiten_get_ai_rate_card",
+}
+AI_WRITES = {
+    "kaiten_save_ai_model",
+    "kaiten_save_ai_rule",
+    "kaiten_report_ai_usage",
+    "kaiten_refund_ai_inference",
+    "kaiten_archive_ai_rule",
+}
 
 
 def definition(slug, kind):
@@ -70,7 +83,10 @@ def fresh_client():
 
 
 async def call(tool, **args):
-    async with Client(server.build(writes=True, ai_enabled=False)) as client:
+    # The stricter projection: generic tools omit and refuse AI credit entitlements.
+    async with Client(
+        server.build(writes=True, ai_enabled=False, hide_ai_entitlements=True)
+    ) as client:
         return await client.call_tool(tool, args, raise_on_error=False)
 
 
@@ -89,13 +105,22 @@ async def test_default_and_malformed_opt_in_hide_schemas_and_calls(monkeypatch, 
         tools = await client.list_tools()
         assert not ({t.name for t in tools} & (AI_READS | AI_WRITES))
         discovery = json.dumps([t.model_dump(by_alias=True) for t in tools]) + mcp.instructions
-        assert "NUMBER_AI_CREDIT" not in discovery
         assert "kaiten_get_ai" not in discovery
         assert "kaiten_report_ai" not in discovery
-        assert "AI credit" not in discovery
+        assert server.AI_INSTRUCTIONS not in mcp.instructions
+        # Released since 0.2.0: generic tools still name the AI credit entitlement type.
+        assert "NUMBER_AI_CREDIT" in discovery
         for name in AI_READS | AI_WRITES:
             assert (await client.call_tool(name, {}, raise_on_error=False)).is_error
     assert not seen
+
+
+async def test_hidden_projection_removes_the_type_from_discovery():
+    mcp = server.build(writes=True, ai_enabled=False, hide_ai_entitlements=True)
+    async with Client(mcp) as client:
+        tools = await client.list_tools()
+    discovery = json.dumps([t.model_dump(by_alias=True) for t in tools]) + mcp.instructions
+    assert "NUMBER_AI_CREDIT" not in discovery
 
 
 @pytest.mark.parametrize("raw", ["true", " TRUE "])
@@ -106,7 +131,7 @@ async def test_enabled_registration_counts(monkeypatch, raw, writes):
     async with Client(server.build(writes=writes)) as client:
         names = {t.name for t in await client.list_tools()}
     assert names & (AI_READS | AI_WRITES) == (AI_READS | AI_WRITES if writes else AI_READS)
-    assert len(names) == (37 if writes else 18)
+    assert len(names) == (42 if writes else 21)
 
 
 def test_fresh_disabled_build_does_not_import_ai_module():
@@ -501,3 +526,66 @@ async def test_creation_keeps_unknown_null_grant_as_ordinary_noop(monkeypatch, n
     result = await call("kaiten_save_license", **args)
     assert not result.is_error, result
     k.licenses.create.assert_awaited_once()
+
+
+async def test_default_build_keeps_released_ai_entitlement_behaviour(monkeypatch):
+    """0.2.0 to 0.4.0 list, create and meter NUMBER_AI_CREDIT whatever the AI switch says."""
+    lic = license_()
+    fam = NS(id="f1", slug="premium", current_version=lic, versions=[lic], version_count=1)
+    ents = [definition("credits", "NUMBER_AI_CREDIT"), definition("quota", "NUMBER")]
+    k = NS(
+        entitlements=NS(list=AsyncMock(return_value=ents)),
+        licenses=NS(
+            list_entitlements=AsyncMock(
+                return_value=[grant("credits", "NUMBER_AI_CREDIT"), grant("quota", "NUMBER")]
+            )
+        ),
+        license_families=NS(list=AsyncMock(return_value=[fam]), get=AsyncMock(return_value=fam)),
+        entitlement_groups=NS(list=AsyncMock(return_value=[])),
+        instances=NS(list=AsyncMock(return_value=[])),
+    )
+    monkeypatch.setattr(sdk, "kaiten", lambda: k)
+    mcp = server.build(writes=True, ai_enabled=False)
+    async with Client(mcp) as client:
+        names = {t.name for t in await client.list_tools()}
+        result = await client.call_tool("kaiten_get_catalog", {})
+    assert not names & (AI_READS | AI_WRITES)
+    assert "(and AI credits)" in mcp.instructions
+    assert [e["slug"] for e in result.structured_content["entitlements"]] == ["credits", "quota"]
+    assert [
+        g["entitlement"] for g in result.structured_content["plans"][0]["current"]["grants"]
+    ] == ["credits", "quota"]
+
+
+async def test_default_build_meters_ai_credit_entitlements(monkeypatch):
+    inst = NS(slug="acme-prod", license_slug="premium-v1")
+    snap = NS(
+        grants={inst.license_slug: [grant("credits", "NUMBER_AI_CREDIT", value=100)]},
+        entitlements={"credits": definition("credits", "NUMBER_AI_CREDIT")},
+        usage={},
+    )
+    monkeypatch.setattr(views, "instance", AsyncMock(return_value=inst))
+    monkeypatch.setattr(views, "snapshot", AsyncMock(return_value=snap))
+    seen = kaiten(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "entitlementSlug": "credits",
+                "entitlementId": "e1",
+                "instanceId": "i1",
+                "licenseId": "l1",
+                "licenseSlug": "premium-v1",
+                "value": {"type": "number", "value": 3},
+                "currentPeriodStart": "2026-01-01T00:00:00Z",
+                "currentPeriodEnd": "2026-02-01T00:00:00Z",
+            },
+        )
+    )
+    async with Client(server.build(writes=True, ai_enabled=False)) as client:
+        result = await client.call_tool(
+            "kaiten_report_usage",
+            {"instance": inst.slug, "entitlement": "credits", "amount": 3, "behavior": "append"},
+            raise_on_error=False,
+        )
+    assert not result.is_error, result
+    assert [r.method for r in seen] == ["POST"]

@@ -93,6 +93,7 @@ async def test_ai_phase_retries_keep_identity_and_exact_body(phase, status):
         request_type="COMPLETION",
         usage={"inputTokens": 100, "outputTokens": 50},
         metadata={"trace": {"provider": "own", "ordinal": 1}},
+        confirm=True,
     )
     if status:
         args["request_status"] = status
@@ -185,6 +186,7 @@ async def test_ai_denial_and_retry_conflict_codes_are_preserved():
         model="assistant",
         request_type="COMPLETION",
         usage={},
+        confirm=True,
     )
     assert result.is_error
     assert "TransactionIdReused" in result.content[0].text
@@ -209,6 +211,7 @@ async def test_history_and_reservations_preserve_paging_and_credit_strings():
     )
     assert result.structured_content == page
     assert dict(seen[-1].url.params) == {
+        "from": "1970-01-01T00:00:00Z",
         "transactionId": "call:001",
         "status": "COMMITTED",
         "cursor": "a+b",
@@ -372,6 +375,7 @@ async def test_commit_can_inherit_model_and_request_type():
         phase="commit",
         request_status="NOT_SENT",
         usage={},
+        confirm=True,
     )
     assert not result.is_error
     value = json.loads(seen[-1].content)["value"]
