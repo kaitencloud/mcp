@@ -66,7 +66,9 @@ def fresh_client():
 @pytest.mark.parametrize("enabled", [False, True])
 async def test_targeting_schema_uses_original_type_without_extra_scopes(enabled):
     seen = kaiten(lambda request: httpx.Response(200, json=SCHEMA))
-    async with Client(build(writes=False, ai_enabled=enabled)) as client:
+    async with Client(
+        build(writes=False, ai_enabled=enabled, hide_ai_entitlements=not enabled)
+    ) as client:
         result = await client.call_tool("kaiten_test_rule", {})
     body = result.structured_content
     node = body["roots"][0]["fields"][0]
@@ -95,7 +97,9 @@ async def test_rehearsal_projects_only_reserved_entitlements(enabled):
             },
         )
     )
-    async with Client(build(writes=False, ai_enabled=enabled)) as client:
+    async with Client(
+        build(writes=False, ai_enabled=enabled, hide_ai_entitlements=not enabled)
+    ) as client:
         result = await client.call_tool("kaiten_test_rule", {"rule": "true"})
     body = result.structured_content
     assert body["valid"] is True and body["matched"] is True
@@ -134,7 +138,7 @@ async def test_legacy_schema_does_not_disclose_unclassified_entitlement_keys():
     for node in legacy["roots"][0]["fields"][0]["entries"]:
         node.pop("entitlementType", None)
     seen = kaiten(lambda request: httpx.Response(200, json=legacy))
-    async with Client(build(writes=False, ai_enabled=False)) as client:
+    async with Client(build(writes=False, ai_enabled=False, hide_ai_entitlements=True)) as client:
         result = await client.call_tool("kaiten_test_rule", {})
     assert result.structured_content["roots"][0]["fields"][0]["knownKeys"] == []
     assert len(seen) == 1

@@ -89,9 +89,31 @@ async def call_unwrapped(
     idempotent: bool | None = None,
     params: dict[str, Any] | None = None,
 ) -> Any:
+    data, _ = await call_unwrapped_with_headers(
+        method, path, body, idempotent=idempotent, params=params
+    )
+    return data
+
+
+async def call_unwrapped_with_headers(
+    method: str,
+    path: str,
+    body: Any = None,
+    *,
+    idempotent: bool | None = None,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[Any, Any]:
+    """call_unwrapped, with request headers of its own and the response's headers back.
+
+    The extra headers ride on a copy of the transport that shares its connection pool and its
+    credential, so they apply to this one request only.
+    """
     api = kaiten()._api
+    if headers:
+        api = api.copy(default_headers={**api.default_headers, **headers})
     response = await api.request(method, path, body=body, idempotent=idempotent, params=params)
-    return api.decode(response)
+    return api.decode(response), response.headers
 
 
 def describe(e: APIStatusError) -> str:

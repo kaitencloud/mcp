@@ -115,7 +115,8 @@ curl http://localhost:8000/health
   `KAITEN_API_TOKEN` unset: otherwise a request without Authorization uses that process fallback.
 - AI-credit tools are absent by default. Only process startup `KAITEN_MCP_ENABLE_AI=true` opts in locally;
   it cannot bypass the API's authorization or `403 AIUsage.Disabled` deployment policy. Read-only mode
-  still excludes all writes. See README's experimental AI section before enabling.
+  still excludes all writes. The AI writes that move a customer's credits (usage reports, refunds) and rule
+  archival only preview until called with `confirm=true`. See README's experimental AI section before enabling.
 - Give an agent the least it needs. A read-only server (`KAITEN_MCP_READ_ONLY=true`) cannot even attempt a
   write, whatever its token allows.
 - Never commit a client configuration that contains a token; prefer environment variables or a prompt.

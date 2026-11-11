@@ -34,13 +34,25 @@ DESTRUCTIVE = {
 }
 
 
-def register_all(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
+def register_all(
+    mcp: FastMCP, *, writes: bool, ai_enabled: bool = False, hide_ai_entitlements: bool = False
+) -> None:
+    """Register the catalogue.
+
+    ai_enabled registers the AI credit tools (models, rules, history, charges, refunds). It does
+    not change the generic tools: since 0.2.0 they list, create and meter NUMBER_AI_CREDIT
+    entitlements like any other, and turning the AI tools off must not take that away.
+    hide_ai_entitlements is the stricter projection, off unless a caller asks for it: the generic
+    tools then omit and refuse AI credit entitlements.
+    """
     from . import access, accounts, catalog, delete, flags, overview, releases, settings, usage
 
     ai_enabled = ai_enabled is True
+    # The generic modules' ai_enabled says whether AI entitlements are visible to them.
+    visible = hide_ai_entitlements is not True
     for module in (overview, accounts, usage, catalog, flags, releases, access, settings, delete):
         if module in (overview, accounts, usage, catalog, flags, delete):
-            module.register(mcp, writes=writes, ai_enabled=ai_enabled)
+            module.register(mcp, writes=writes, ai_enabled=visible)
         else:
             module.register(mcp, writes=writes)
     if ai_enabled:
