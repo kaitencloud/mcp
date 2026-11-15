@@ -35,11 +35,39 @@ DESTRUCTIVE = {
 
 
 def register_all(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
-    from . import access, accounts, catalog, delete, flags, overview, releases, settings, usage
+    from . import (
+        access,
+        accounts,
+        billing,
+        catalog,
+        delete,
+        flags,
+        overview,
+        releases,
+        settings,
+        usage,
+        webhooks,
+    )
 
     ai_enabled = ai_enabled is True
-    for module in (overview, accounts, usage, catalog, flags, releases, access, settings, delete):
-        if module in (overview, accounts, usage, catalog, flags, delete):
+    # The modules that read or write an entitlement take the rollout decision, so
+    # that an AI credit pool stays invisible while it is off; the others cannot
+    # reach one.
+    aware = (overview, accounts, usage, catalog, flags, delete)
+    for module in (
+        overview,
+        accounts,
+        usage,
+        catalog,
+        billing,
+        flags,
+        releases,
+        access,
+        settings,
+        webhooks,
+        delete,
+    ):
+        if module in aware:
             module.register(mcp, writes=writes, ai_enabled=ai_enabled)
         else:
             module.register(mcp, writes=writes)

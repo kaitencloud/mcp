@@ -16,14 +16,17 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **31 tools by default**, plus six experimental AI-credit intents when explicitly enabled, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **46 tools by default**, plus six
+experimental AI-credit intents when explicitly enabled, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
   current version, finds the zone, creates the customer if asked and sets the license term; the agent never
   handles an id. `kaiten_get_customer` answers "how is this customer doing" in one call.
 - **Reads return slices, never the whole catalog.** Resources are projected onto the fields that carry
-  meaning, named by slug, with usage already set against its limit (`used`, `limit`, `percent`, `state`).
+  meaning, named by slug, with usage already set against its limit (`used`, `limit`, `percent`, `state`):
+  the effective limit Kaiten enforces, the License's grant with the instance's add-ons, voucher boosts and
+  entitlement exception applied.
 - **Writes merge, and report truthfully.** Only what an agent passes changes. Every write answers with a
   `status` — `created`, `updated`, `unchanged`, `recorded`, `rejected`, `preview` or `deleted` — and the
   exact `changes`, computed from what Kaiten holds afterwards. A call that changes nothing says `unchanged`
@@ -33,13 +36,18 @@ rules in Kaiten's product vision for agent-readiness:
   version is edited in place, the zone's instances when a release is deployed), and `kaiten_delete` previews
   its blast radius until called with `confirm=true`.
 - **An agent's blast radius is its principal's.** Each request carries the caller's own Kaiten token; the
-  server has no credential of its own. `KAITEN_MCP_READ_ONLY=true` registers the read tools only.
+  server has no credential of its own. `KAITEN_MCP_READ_ONLY=true` registers the 20 read tools only.
 
 There is no API contract in this repository. Every call goes through the official
 [Python SDK](https://github.com/kaitencloud/sdk-python) (`kaitencloud`), generated from Kaiten's OpenAPI
 document: its methods, its models, its enums (which become the tools' input schemas), its enforcement
-arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). AI control-plane endpoints not yet wrapped by the installed SDK use its authenticated transport,
-like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract without editing generated code.
+arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`). A new API field reaches the
+MCP by bumping the SDK. Kaiten Cloud's webhook routes are in no OpenAPI document: the server calls them in the
+shapes Kaiten's console sends, and carries the catalogue of the event types they subscribe to, read from the SDK's models, generated from
+Kaiten's contract.
+AI control-plane endpoints not yet wrapped by the installed SDK use its authenticated transport,
+like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract without editing
+generated code.
 
 ## Tools
 
@@ -47,13 +55,15 @@ like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract
 | --- | --- | --- |
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
-| Usage | `kaiten_get_usage` | `kaiten_report_usage` |
+| Usage | `kaiten_get_usage` · `kaiten_get_usage_reports` | `kaiten_report_usage` |
 | AI credits (opt-in only) | `kaiten_get_ai_models` · `kaiten_get_ai_rules` · `kaiten_get_ai_history` | `kaiten_save_ai_model` · `kaiten_save_ai_rule` · `kaiten_report_ai_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
+| Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_save_plan_settings` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
 | Releases | `kaiten_get_deployments` | `kaiten_create_release` · `kaiten_deploy_release` · `kaiten_save_deployment_zone` |
 | Access & audit | `kaiten_get_access` · `kaiten_get_audit_trail` | `kaiten_issue_token` · `kaiten_revoke_token` |
 | Settings | `kaiten_get_metadata_fields` · `kaiten_get_connectors` | `kaiten_save_metadata_field` · `kaiten_configure_connector` |
+| Webhooks | `kaiten_get_webhooks` | `kaiten_save_webhook` · `kaiten_delete_webhook` (previews unless `confirm=true`) |
 | Deletion | | `kaiten_delete` (previews unless `confirm=true`) |
 
 Each tool's description and input schema are the reference; `kaiten_overview` is the intended first call.
@@ -146,8 +156,8 @@ KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uvx kaite
 uvx kaitencloud-mcp http --port 8000
 
 # with Docker
-docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp:0.2 stdio
-docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... ghcr.io/kaitencloud/kaiten-mcp:0.2   # http, the default
+docker run -i --rm -e KAITEN_API_BASE_URL=... -e KAITEN_API_TOKEN=ksh_... ghcr.io/kaitencloud/kaiten-mcp:0.4 stdio
+docker run -p 8000:8000 -e KAITEN_API_BASE_URL=... ghcr.io/kaitencloud/kaiten-mcp:0.4   # http, the default
 
 # from a checkout
 KAITEN_API_BASE_URL=http://localhost:6060/api KAITEN_API_TOKEN=ksh_... uv run kaiten-mcp stdio
@@ -163,7 +173,7 @@ get a token.
 | Variable | Default | |
 | --- | --- | --- |
 | `KAITEN_API_BASE_URL` | `http://localhost:6060/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
-| `KAITEN_API_TOKEN` | | The token for stdio, or for an HTTP request that brings none |
+| `KAITEN_API_TOKEN` | | The token for stdio only; never used for HTTP requests |
 | `KAITEN_MCP_ENABLE_AI` | `false` | Explicit `true` registers experimental AI intents; not server authorization |
 | `KAITEN_MCP_READ_ONLY` | `false` | Register read tools only (also `--read-only`) |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP listener |
@@ -172,9 +182,12 @@ get a token.
 
 `GET /health` reports the server's version and whether Kaiten's gateway answers.
 
-For shared HTTP deployments, leave `KAITEN_API_TOKEN` unset: an absent Authorization header otherwise
-uses that process credential (the existing single-user/stdio fallback). A supplied caller credential
-always takes precedence; denial never retries as the process token.
+HTTP API calls require the caller's own nonempty `Authorization: Bearer ksh_...` header. Missing,
+empty or malformed credentials fail before any API call; `KAITEN_API_TOKEN` is never an HTTP fallback,
+even on a single-user server. Existing headerless HTTP clients must start sending a token or use stdio.
+Kaiten's gateway validates the caller's token and scopes; a 401 or 403 is never retried with a process
+credential. MCP initialization and tool discovery remain public, as does `/health`. Host/Origin
+allowlists protect the transport but do not authenticate callers; use TLS for remote connections.
 
 ## Development
 
@@ -184,7 +197,9 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest                  # unit tests: the real SDK over a mocked Kaiten
 ```
 
-`tests/e2e` drives every tool through a real MCP client against a live Kaiten. With
+`tests/e2e` drives every tool but the billing and webhook ones through a real MCP client against a
+live Kaiten: a subscription and its invoices can never be deleted, only Kaiten Cloud serves webhooks,
+and the suite cleans up after itself. With
 [Kaiten](https://github.com/kaitencloud/kaiten)'s own stack and its demo dataset (`task quickstart`, which
 seeds the Kaiten Sushi Shop), and a token with `read:*` and `write:*` on that organization:
 

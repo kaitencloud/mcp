@@ -20,6 +20,7 @@ from fastmcp.exceptions import ToolError
 from kaitencloud import usage as enforcement
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$")
+IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9._:-]{1,128}")
 UNLIMITED = enforcement.UNLIMITED
 METERED = ("NUMBER", "NUMBER_AI_CREDIT")
 
@@ -30,6 +31,16 @@ def slug(value: str, what: str = "slug") -> str:
         raise ToolError(
             f"{what} {value!r} is not a Kaiten slug: lowercase letters, digits and dashes, "
             "2-100 characters, starting and ending with a letter or digit."
+        )
+    return value
+
+
+def idempotency_key(value: str) -> str:
+    """A usage report's idempotency key. Kaiten matches it exactly, so it is never trimmed."""
+    if not IDEMPOTENCY_KEY.fullmatch(value):
+        raise ToolError(
+            f"idempotency_key {value!r} is not a Kaiten idempotency key: 1 to 128 letters, digits, "
+            "'.', '_', ':' or '-', e.g. 'llm-call-9f2c:tokens'."
         )
     return value
 
@@ -115,7 +126,14 @@ def usage_state(
     if limit is None:
         return {"used": used, "limit": None, "state": "not_granted"}
     if enforcement.is_unlimited(limit) or overage_percent == UNLIMITED:
-        return {"used": used, "limit": "unlimited", "state": "unlimited"}
+        # The numbers behind it, as Kaiten gives them: -1 and -1.
+        return {
+            "used": used,
+            "limit": "unlimited",
+            "raw_limit": limit,
+            "overage_percent": overage_percent,
+            "state": "unlimited",
+        }
     out: dict[str, Any] = {"used": used, "limit": limit}
     pct = enforcement.percentage_used(limit, used)
     out["percent"] = round(pct, 1) if pct is not None else None
@@ -135,6 +153,38 @@ def usage_state(
     return out
 
 
+def effective_usage(u: Any, warning_percent: int | None = None) -> dict[str, Any]:
+    """A usage read against the limit Kaiten enforces on the instance.
+
+    That limit is the read's own: the License's grant with the instance's add-ons, voucher boosts
+    and entitlement exception applied, and the allowance that goes with it -- never the License's
+    grant alone. limit_includes names the layers above the License that apply to it.
+    """
+    wire = u.to_dict()  # the wire shape, members this SDK does not type yet included
+    out = usage_state(
+        plain(wire.get("value")),
+        plain(wire.get("limit")),
+        wire.get("limitCapExceededOveragePercent"),
+        warning_percent,
+    )
+    layers = wire.get("provenance") or {}
+    above = [
+        name
+        for key, name in (("addons", "add-ons"), ("boosts", "vouchers"), ("exception", "exception"))
+        if layers.get(key)
+    ]
+    if above:
+        out["limit_includes"] = above
+    return out
+
+
+def window(u: Any) -> dict[str, str]:
+    """The usage window a usage read or report counts in; none for a lifetime counter."""
+    return drop_none(
+        {"period_start": iso(u.current_period_start), "resets_at": iso(u.current_period_end)}
+    )
+
+
 ATTENTION_STATES = {"warning", "at_limit", "overage", "over"}
 
 
@@ -148,6 +198,7 @@ def customer(c: Any) -> dict:
             "name": c.name,
             "domain": c.domain,
             "external_customer_id": c.external_customer_id,
+            "billing_email": c.billing_email,
             "integrations": {
                 k: getattr(v, "external_id", v) for k, v in (c.integrations or {}).items()
             }
@@ -187,8 +238,36 @@ def license_(lic: Any, plan: str | None = None) -> dict:
             "state": lic.lifecycle_state,
             "is_default": lic.is_default,
             "description": lic.description or None,
+            # How the version is sold. CUSTOM, a new plan's default, is never sold self-serve.
+            "pricing": lic.pricing_type,
+            "requires_payment_method": lic.requires_payment_method,
+            "trial_days": lic.trial_period_days,
+            "self_serve_cta_url": lic.self_serve_cta_url,
         }
     )
+
+
+def plan_settings(f: Any) -> dict:
+    """A plan's own settings: its License family's, the same for every version of it."""
+    return drop_none(
+        {
+            "plan": f.slug,
+            "public": f.is_public,
+            "fallback_plan": f.fallback_license_family_slug,
+            "trial_end_without_payment_method": f.trial_end_without_payment_method,
+            "trial_reminder_days": f.trial_reminder_days,
+        }
+    )
+
+
+def listed_version(f: Any) -> str | None:
+    """The version a public plan's public catalogue offers: its default, which Kaiten keeps PUBLISHED.
+
+    None when the plan is private or has no default. The plan's current version is no guide on its
+    own: without a default it is the highest PUBLISHED version, which the catalogue does not list.
+    """
+    current = f.current_version
+    return current.slug if f.is_public and current is not None and current.is_default else None
 
 
 def entitlement(e: Any) -> dict:
@@ -219,7 +298,8 @@ def grant(g: Any) -> dict:
     pct = g.limit_cap_exceeded_overage_percent
     if g.entitlement_type in METERED:
         if enforcement.is_unlimited(value):
-            out["value"] = "unlimited"
+            # The numbers Kaiten stores for it, as it stores them: -1 and -1.
+            out.update(value="unlimited", raw_value=value, overage_percent=pct)
         elif enforcement.is_soft_limit(value, pct):
             out["overage_percent"] = pct
         else:
@@ -247,6 +327,22 @@ def release(r: Any) -> dict:
             "description": r.description or None,
             "created_at": iso(r.created_at),
             "components": [f"{c.name}@{c.version}" for c in r.components or []] or None,
+        }
+    )
+
+
+def usage_report(r: Any) -> dict:
+    """A report Kaiten accepted, as its usage history keeps it: the numbers are its exact decimals."""
+    return drop_none(
+        {
+            "at": iso(r.reported_at),
+            "behavior": r.behavior,
+            "amount": r.reported_value,
+            "before": r.value_before,
+            "after": r.value_after,
+            "limit": "unlimited" if r.limit_value is None else r.limit_value,
+            "transaction_id": r.transaction_id,
+            "metadata": r.properties,
         }
     )
 

@@ -48,6 +48,37 @@ def grant(slug, kind, value=10):
     )
 
 
+class _Value:
+    def __init__(self, type_, value):
+        self.type = type_
+        self.value = value
+
+
+class UsageRow:
+    """A usage read as the SDK returns one.
+
+    Since main, a view reads an instance's effective entitlements from its usage read, not from
+    its License's grants: the row states the value's type, and `shapes.effective_usage` reads the
+    limit, the overage allowance and the provenance off the wire shape.
+    """
+
+    def __init__(self, slug, type_="number", value=10, limit=100, provenance=None):
+        self.entitlement_slug = slug
+        self.value = _Value(type_, value)
+        self.limit = _Value(type_, limit)
+        self.current_period_start = None
+        self.current_period_end = None
+        self._provenance = provenance or {}
+
+    def to_dict(self):
+        return {
+            "value": {"type": self.value.type, "value": self.value.value},
+            "limit": {"type": self.limit.type, "value": self.limit.value},
+            "limitCapExceededOveragePercent": 0,
+            "provenance": self._provenance,
+        }
+
+
 def license_():
     return NS(
         slug="premium-v1",
@@ -60,6 +91,11 @@ def license_():
         family_id="f1",
         family_slug="premium",
         lifecycle_state="PUBLISHED",
+        # How it is sold, as the API defaults them: nothing configured.
+        pricing_type="CUSTOM",
+        requires_payment_method=False,
+        trial_period_days=None,
+        self_serve_cta_url=None,
     )
 
 
@@ -106,7 +142,8 @@ async def test_enabled_registration_counts(monkeypatch, raw, writes):
     async with Client(server.build(writes=writes)) as client:
         names = {t.name for t in await client.list_tools()}
     assert names & (AI_READS | AI_WRITES) == (AI_READS | AI_WRITES if writes else AI_READS)
-    assert len(names) == (37 if writes else 18)
+    # main's own counts, 46 with writes and 20 read-only, plus this module's six and three.
+    assert len(names) == (52 if writes else 23)
 
 
 def test_fresh_disabled_build_does_not_import_ai_module():
@@ -288,18 +325,20 @@ def test_operational_projection_uses_original_catalog_type_not_metadata(enabled)
         definition("feature", "BOOLEAN"),
     ]
     config_value = {"ai": {"type": "NUMBER_AI_CREDIT", "units": "0.000001"}}
-    grants = [
-        grant("credits", "NUMBER"),
-        grant("quota", "NUMBER"),
-        grant("config", "CONFIG", config_value),
-        grant("feature", "BOOLEAN", True),
+    # The rows say "number"/"config"/"boolean"; only the catalogue definition says which pool is
+    # AI, and the config value carries a decoy type the projection must not read.
+    rows = [
+        UsageRow("credits"),
+        UsageRow("quota"),
+        UsageRow("config", "config", config_value),
+        UsageRow("feature", "boolean", True),
     ]
     snap = views.Snapshot(
-        [inst],
-        {},
-        {inst.license_slug: grants},
-        {e.slug: e for e in definitions},
-        {},
+        instances=[inst],
+        licenses={},
+        entitlements={e.slug: e for e in definitions},
+        plans={},
+        usage={inst.slug: rows},
         ai_enabled=enabled,
     )
     projected = views.entitlements_view(snap, inst)
@@ -308,7 +347,8 @@ def test_operational_projection_uses_original_catalog_type_not_metadata(enabled)
     )
     assert projected["config"] == {"config": config_value}
     assert projected["features"] == {"feature": True}
-    assert len(snap.grants[inst.license_slug]) == 4
+    # The snapshot keeps every row; only the projection hides one.
+    assert len(snap.usage[inst.slug]) == 4
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -434,7 +474,18 @@ async def test_search_omits_ai_rows_before_totals_and_limit(monkeypatch):
 
 async def test_mixed_catalog_keeps_ordinary_grants_and_hides_ai(monkeypatch):
     lic = license_()
-    fam = NS(id="f1", slug="premium", current_version=lic, versions=[lic], version_count=1)
+    fam = NS(
+        id="f1",
+        slug="premium",
+        current_version=lic,
+        versions=[lic],
+        version_count=1,
+        # How a plan is listed and how its trials end, as the API defaults them.
+        is_public=False,
+        fallback_license_family_slug=None,
+        trial_end_without_payment_method=None,
+        trial_reminder_days=None,
+    )
     ents = [definition("credits", "NUMBER_AI_CREDIT"), definition("quota", "NUMBER")]
     k = NS(
         entitlements=NS(list=AsyncMock(return_value=ents)),
@@ -465,11 +516,11 @@ async def test_operational_usage_total_and_limit_use_only_visible_grants(monkeyp
     inst = NS(slug="acme-prod", license_slug="premium-v1", customer_slug="acme")
     definitions = [definition("credits", "NUMBER_AI_CREDIT"), definition("quota", "NUMBER")]
     snap = views.Snapshot(
-        [inst],
-        {},
-        {inst.license_slug: [grant("credits", "NUMBER"), grant("quota", "NUMBER")]},
-        {e.slug: e for e in definitions},
-        {},
+        instances=[inst],
+        licenses={},
+        entitlements={e.slug: e for e in definitions},
+        plans={},
+        usage={inst.slug: [UsageRow("credits"), UsageRow("quota")]},
     )
     monkeypatch.setattr(views, "snapshot", AsyncMock(return_value=snap))
     monkeypatch.setattr(

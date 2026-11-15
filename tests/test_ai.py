@@ -385,13 +385,26 @@ async def test_ai_numeric_set_is_refused_but_append_adjustments_remain(monkeypat
     from kaiten_mcp import views
 
     inst = SimpleNamespace(slug="acme-prod", license_slug="premium-v1")
-    grant = SimpleNamespace(
-        entitlement_slug="ai-credits",
-        entitlement_type="NUMBER_AI_CREDIT",
-        value={"type": "number", "value": 100},
-        limit_cap_exceeded_overage_percent=0,
+    # Since main, the report path reads the instance's effective entitlements from its usage
+    # read, and the catalogue definition is what says the pool is an AI one.
+    definition = SimpleNamespace(
+        type="NUMBER_AI_CREDIT",
+        warning_threshold_percent=None,
+        unit_plural=None,
+        unit_singular=None,
     )
-    snap = SimpleNamespace(grants={"premium-v1": [grant]}, entitlements={}, usage={})
+    row = SimpleNamespace(
+        entitlement_slug="ai-credits",
+        value=SimpleNamespace(type="number", value=100),
+        current_period_start=None,
+        current_period_end=None,
+        to_dict=lambda: {
+            "value": {"type": "number", "value": 100},
+            "limit": {"type": "number", "value": 1000},
+            "limitCapExceededOveragePercent": 0,
+        },
+    )
+    snap = SimpleNamespace(entitlements={"ai-credits": definition}, usage={"acme-prod": [row]})
     monkeypatch.setattr(views, "instance", AsyncMock(return_value=inst))
     monkeypatch.setattr(views, "snapshot", AsyncMock(return_value=snap))
     seen = kaiten(
@@ -404,6 +417,17 @@ async def test_ai_numeric_set_is_refused_but_append_adjustments_remain(monkeypat
                 "licenseId": "l1",
                 "licenseSlug": "premium-v1",
                 "value": {"type": "number", "value": 1},
+                # Required of a report's answer since Kaiten 26.10.8.
+                "source": "license",
+                # Every layer the limit is made of: none above the License here.
+                "provenance": {
+                    "addons": [],
+                    "boosts": [],
+                    "exception": None,
+                    "license": None,
+                    "number": None,
+                },
+                "transactionId": None,
                 "currentPeriodStart": "2026-01-01T00:00:00Z",
                 "currentPeriodEnd": "2026-02-01T00:00:00Z",
             },

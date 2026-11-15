@@ -47,6 +47,17 @@ def test_slugs_are_constrained(bad):
         shapes.slug(bad)
 
 
+@pytest.mark.parametrize("bad", ["", "k" * 129, "llm call", "naïve", "trailing\n"])
+def test_idempotency_keys_are_constrained(bad):
+    with pytest.raises(ToolError):
+        shapes.idempotency_key(bad)
+
+
+def test_an_idempotency_key_is_taken_as_written():
+    key = "Llm.call_9f2c:tokens-" + "k" * 107
+    assert len(key) == 128 and shapes.idempotency_key(key) == key
+
+
 def test_parse_time_accepts_dates_and_timestamps():
     assert shapes.rfc3339(shapes.parse_time("2027-01-31")) == "2027-01-31T00:00:00Z"
     assert shapes.rfc3339(shapes.parse_time("2027-01-31T10:00:00+02:00")) == "2027-01-31T08:00:00Z"
