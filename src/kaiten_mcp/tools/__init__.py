@@ -45,13 +45,38 @@ def register_all(
     hide_ai_entitlements is the stricter projection, off unless a caller asks for it: the generic
     tools then omit and refuse AI credit entitlements.
     """
-    from . import access, accounts, catalog, delete, flags, overview, releases, settings, usage
+    from . import (
+        access,
+        accounts,
+        billing,
+        catalog,
+        delete,
+        flags,
+        overview,
+        releases,
+        settings,
+        usage,
+        webhooks,
+    )
 
     ai_enabled = ai_enabled is True
     # The generic modules' ai_enabled says whether AI entitlements are visible to them.
     visible = hide_ai_entitlements is not True
-    for module in (overview, accounts, usage, catalog, flags, releases, access, settings, delete):
-        if module in (overview, accounts, usage, catalog, flags, delete):
+    aware = (overview, accounts, usage, catalog, flags, delete)
+    for module in (
+        overview,
+        accounts,
+        usage,
+        catalog,
+        billing,
+        flags,
+        releases,
+        access,
+        settings,
+        webhooks,
+        delete,
+    ):
+        if module in aware:
             module.register(mcp, writes=writes, ai_enabled=visible)
         else:
             module.register(mcp, writes=writes)

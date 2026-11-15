@@ -89,16 +89,209 @@ async def test_api_errors_reach_the_agent_with_their_code():
     assert "no such customer" in result.content[0].text
 
 
+STAMPS = {"createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"}
+INSTANCE = {
+    "id": "i1",
+    "slug": "tako-prod",
+    "name": "Tako Production",
+    "description": "",
+    "customerId": "c1",
+    "customerSlug": "tako",
+    "licenseId": "l1",
+    "licenseSlug": "standard",
+    "startLicenseDate": "2026-01-01T00:00:00Z",
+    "endLicenseDate": "2099-01-01T00:00:00Z",
+    "createdBy": {"id": "u", "name": "u"},
+    "updatedBy": {"id": "u", "name": "u"},
+    **STAMPS,
+}
+# What an add-on and an exception add to the License's grant, as a usage read's provenance says.
+ADDON = {
+    "addons": [
+        {
+            "addonEntitlementId": "ae1",
+            "addonId": "a1",
+            "attachedAt": "2026-01-01T00:00:00Z",
+            "instanceAddonId": "ia1",
+            "limitCapExceededOveragePercent": None,
+            "quantity": 1,
+            "overrideBehavior": "ADD",
+            "value": {"type": "number", "value": 5},
+        }
+    ]
+}
+EXCEPTION = {
+    "exception": {
+        "instanceEntitlementExceptionId": "x1",
+        "kind": "ADD",
+        "startsAt": "2026-01-01T00:00:00Z",
+        "endsAt": None,
+        "value": {"type": "number", "value": 5},
+    }
+}
+
+
+def drivers(used: float, limit: float, layers: dict) -> dict:
+    """A usage read of delivery-drivers. Its limit is the effective one, which the API enforces."""
+    return {
+        "entitlementId": "e1",
+        "entitlementSlug": "delivery-drivers",
+        "licenseId": "l1",
+        "licenseSlug": "standard",
+        "value": {"type": "number", "value": used, "event_count": 1},
+        "limit": {"type": "number", "value": limit},
+        "limitCapExceededOveragePercent": 20,
+        "source": "license",
+        "provenance": {
+            "addons": [],
+            "boosts": [],
+            "exception": None,
+            "license": None,
+            "number": None,
+            **layers,
+        },
+    }
+
+
+def tako(usage: dict, *, grant: float, reported: object = None) -> dict:
+    """The routes of a Kaiten where tako-prod's License grants `grant` drivers, whose usage read is
+    `usage`, and whose next usage report answers `reported`."""
+    return {
+        ("GET", "/instances"): [INSTANCE],
+        ("GET", "/instances/tako-prod"): INSTANCE,
+        ("GET", "/instances/tako-prod/entitlements/usage"): [usage],
+        ("POST", "/instances/tako-prod/entitlements/delivery-drivers/usage"): reported,
+        ("GET", "/licenses/standard/entitlements"): [
+            {
+                "entitlementSlug": "delivery-drivers",
+                "entitlementName": "Drivers",
+                "entitlementType": "NUMBER",
+                "licenseId": "l1",
+                "licenseSlug": "standard",
+                "value": {"type": "number", "value": grant},
+                "limitCapExceededOveragePercent": 20,
+                "createdBy": {"id": "u", "name": "u"},
+                "updatedBy": {"id": "u", "name": "u"},
+                **STAMPS,
+            }
+        ],
+        ("GET", "/licenses"): [
+            {
+                "id": "l1",
+                "slug": "standard",
+                "name": "Standard",
+                "description": "",
+                "type": "PAID",
+                "version": "1",
+                "isDefault": False,
+                "familyId": "f1",
+                **STAMPS,
+            }
+        ],
+        ("GET", "/entitlements"): [
+            {
+                "id": "e1",
+                "slug": "delivery-drivers",
+                "name": "Drivers",
+                "description": "",
+                "type": "NUMBER",
+                "warningThresholdPercent": 80,
+                **STAMPS,
+            }
+        ],
+        ("GET", "/license-families"): [
+            {
+                "id": "f1",
+                "slug": "standard",
+                "versionCount": 1,
+                "isPublic": False,
+                "fallbackLicenseFamilySlug": None,
+                "trialEndWithoutPaymentMethod": "CANCEL",
+                "trialReminderDays": 3,
+                **STAMPS,
+            }
+        ],
+    }
+
+
+def a_kaiten_where(usage: dict, *, grant: float, reported: dict | None = None):
+    """tako-prod, whose License grants `grant` drivers, whose usage read is `usage`, and whose
+    next usage report answers `reported`."""
+    routes = tako(usage, grant=grant, reported=reported)
+    # The SDK sends every operation under /api.
+    kaiten(lambda r: httpx.Response(200, json=routes[(r.method, r.url.path.removeprefix("/api"))]))
+
+
+@pytest.mark.parametrize(
+    ("layers", "grant", "used", "limit"),
+    [(ADDON, 5, 5, 10), (EXCEPTION, 10, 8, 15)],
+    ids=["add-on", "exception"],
+)
+async def test_usage_is_measured_against_the_effective_limit(layers, grant, used, limit):
+    # Against the License's grant alone, 5 of 5 would be at_limit and 8 of 10 in warning: both
+    # past min_percent=80, and both a reason for attention.
+    a_kaiten_where(drivers(used, limit, layers), grant=grant)
+    row = (await call("kaiten_get_usage")).structured_content["usage"][0]
+    assert (row["used"], row["limit"], row["state"]) == (used, limit, "ok")
+    assert row["limit_includes"] == ["add-ons" if layers is ADDON else "exception"]
+    assert (await call("kaiten_get_usage", min_percent=80)).structured_content["total"] == 0
+    detail = await call("kaiten_get_instance", instance="tako-prod", recent_events=0)
+    assert detail.structured_content["limits"][0]["limit"] == limit
+    assert detail.structured_content["attention"] == []
+
+
+async def test_a_report_is_judged_against_the_effective_limit():
+    # 12 against a grant of 10 and 20% allowance would be overage, at the hard ceiling. A report's
+    # answer names the idempotency key it was accepted under: none here.
+    reported = {**drivers(12, 15, EXCEPTION), "transactionId": None}
+    a_kaiten_where(drivers(8, 15, EXCEPTION), grant=10, reported=reported)
+    result = await call(
+        "kaiten_report_usage",
+        instance="tako-prod",
+        entitlement="delivery-drivers",
+        amount=12,
+        behavior="set",
+    )
+    usage = result.structured_content["usage"]
+    assert (usage["used"], usage["limit"], usage["percent"], usage["state"]) == (
+        12,
+        15,
+        80.0,
+        "warning",
+    )
+
+
 async def test_read_only_mode_registers_no_write_tool():
     async with Client(build(writes=False)) as c:
         tools = await c.list_tools()
-    assert tools and all(t.annotations.read_only_hint for t in tools)
+    assert len(tools) == 20
+    assert all(t.annotations.read_only_hint for t in tools)
 
 
 async def test_every_tool_declares_its_effect():
     async with Client(build(writes=True)) as c:
         tools = await c.list_tools()
-    assert len(tools) == 31
+    assert len(tools) == 46
     for t in tools:
         assert t.annotations.read_only_hint is not None, t.name
         assert t.description, t.name
+
+
+async def test_a_lifecycle_stage_is_found_whatever_its_case():
+    # Stages are free text, stored as written: an agent asking for BETA means the instances at beta.
+    beta = {**INSTANCE, "lifecycleStage": "beta"}
+    ga = {
+        **INSTANCE,
+        "id": "i2",
+        "slug": "uni-prod",
+        "name": "Uni Production",
+        "lifecycleStage": "ga",
+    }
+
+    def handler(r):
+        # The list also reads the catalogue to name plans; an empty one will do here.
+        return httpx.Response(200, json=[beta, ga] if r.url.path.endswith("/instances") else [])
+
+    kaiten(handler)
+    out = (await call("kaiten_list_instances", lifecycle_stage="BETA")).structured_content
+    assert [i["slug"] for i in out["instances"]] == ["tako-prod"]

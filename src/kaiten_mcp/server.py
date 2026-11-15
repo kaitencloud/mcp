@@ -14,7 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .config import settings
-from .sdk import KaitenErrors
+from .sdk import Tools
 from .tools import register_all
 
 try:
@@ -34,9 +34,16 @@ The model, top down:
   PUBLISHED or ARCHIVED. A plan serves its default version, else its highest published one.
 - A License grants Entitlements: BOOLEAN features, NUMBER quotas (and AI credits) metered by usage
   reports, and CONFIG values. A NUMBER grant is unlimited (-1), a hard limit, or soft with an overage %.
+- What an Instance may use is its effective value: its License's grant with its add-ons, voucher boosts and
+  entitlement exception applied. Usage is read against it; kaiten_get_catalog shows the License's grants alone.
 - Feature flags are evaluated through OpenFeature, with CEL targeting rules reading the customer's
   license and entitlements, and the instance, customer and zone (under __kaiten).
 - Deployment zones run immutable Releases, each a set of versioned Components.
+- Where billing is on, a License version carries prices; an Instance has at most one subscription, pinned to
+  a flat fee, and an invoice is composed at each boundary of it. Add-ons and vouchers sit on top of the
+  License. kaiten_get_billing says whether billing is on, and is the first call for it.
+- Kaiten publishes an event for each change (INSTANCE_CREATED, com.kaiten.instance.v1.created). Kaiten Cloud
+  delivers the ones a webhook names to its URL; a self-hosted Kaiten publishes them to its event stream.
 
 How to work:
 - Start with kaiten_overview, find things with kaiten_search, and read with the kaiten_get_* tools.
@@ -46,7 +53,8 @@ How to work:
   license version, and kaiten_delete without confirm previews what a deletion touches.
 - Prefer a new license version (kaiten_save_license new_version_of=...) to editing a published version
   in place: editing changes every instance on it immediately.
-- Usage reports are not idempotent; never repeat one that answered.
+- A usage report is safe to repeat only with the same idempotency_key; without one, never repeat a report
+  that answered.
 """
 
 
@@ -77,10 +85,9 @@ def build(
         + (AI_INSTRUCTIONS if enabled else ""),
         version=VERSION,
         website_url="https://kaiten.sh",
-        middleware=[KaitenErrors()],
     )
     register_all(
-        mcp,
+        Tools(mcp),
         writes=not settings.read_only if writes is None else writes,
         ai_enabled=enabled,
         hide_ai_entitlements=hide_ai_entitlements,
@@ -109,7 +116,11 @@ def build(
 
 
 def http_app(mcp: FastMCP):
-    """The Streamable HTTP app, stateless so any replica can serve any request."""
+    """Stateless Streamable HTTP, with no process-token fallback for API calls.
+
+    Discovery is public; the SDK requires a caller Bearer token for upstream calls,
+    and Kaiten validates it. Host/Origin protection is not caller authentication.
+    """
     allowed_hosts = [h for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()]
     allowed_origins = [o for o in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()]
     return mcp.http_app(

@@ -51,7 +51,7 @@ starts local servers:
 ```
 
 With Docker instead of uv: `"command": "docker"`, `"args": ["run", "-i", "--rm", "-e", "KAITEN_API_BASE_URL",
-"-e", "KAITEN_API_TOKEN", "ghcr.io/kaitencloud/kaiten-mcp:0.2", "stdio"]`, with the same `env`. A remote server is added from
+"-e", "KAITEN_API_TOKEN", "ghcr.io/kaitencloud/kaiten-mcp:0.4", "stdio"]`, with the same `env`. A remote server is added from
 **Settings → Connectors** instead.
 
 ## Cursor
@@ -98,21 +98,29 @@ curl http://localhost:8000/health
 
 ## Troubleshooting
 
-- **A tool answers `Kaiten API error (401 Unauthorized) [ValidateToken.Invalid]`** — Kaiten refused the
-  credential: it must be `Bearer ksh_...`, active, and not expired. The server forwards it without
-  checking it, so `/mcp` itself answers, and lists the tools, whatever the token.
-- **A tool answers `No Kaiten credential`** — the request brought no `Authorization` header, and the
-  server has no `KAITEN_API_TOKEN` to fall back on.
-- **A tool answers `Kaiten API error (403 Forbidden) [Auth.MissingScope]`** — the token lacks the scope
-  that operation needs, which the message names; issue one with more.
+- **A tool answers `Kaiten API 401 ValidateToken.Invalid`** — Kaiten refused the credential: it must be
+  `Bearer ksh_...`, active, and not expired. The server forwards it without checking it, so `/mcp` itself
+  answers, and lists the tools, whatever the token.
+- **A tool answers `No Kaiten credential`** — for HTTP, send a nonempty
+  `Authorization: Bearer ksh_...` header on every request. Missing, empty or malformed headers are
+  rejected before any API call, even if the server has `KAITEN_API_TOKEN` configured. For stdio, set
+  `KAITEN_API_TOKEN` in the server's environment.
+- **A tool answers `Kaiten API 403 Auth.MissingScope`** — the token lacks the scope that operation needs,
+  which the message names; issue one with more.
+- **A tool answers `Kaiten API 422 ...`, then lines `- body.<field>: ...`** — Kaiten refused the values
+  sent, and each line names a field at fault and why. A refusal is an answer: the server logs it on one
+  line, where an unexpected error is logged with its traceback.
 - **Every call fails to connect** — `KAITEN_API_BASE_URL` must be the gateway as seen *from the server*
   (inside Docker, not `localhost`). `GET /health` says whether it answers.
 - **Tools changed but the client shows the old ones** — restart the client; most cache the tool list.
 
 ## Security
 
-- A supplied credential is forwarded as the caller's token. In a shared HTTP deployment, leave
-  `KAITEN_API_TOKEN` unset: otherwise a request without Authorization uses that process fallback.
+- HTTP API calls act only as the caller's Bearer token; `KAITEN_API_TOKEN` is exclusively for stdio.
+  There is no single-user HTTP fallback. Headerless HTTP clients must send their token or use stdio.
+  Invalid tokens and missing scopes are rejected by Kaiten, never retried as the process token.
+- MCP initialization/tool discovery and `/health` are public. Host/Origin checks are not caller
+  authentication; use TLS when sending tokens to a remote server.
 - AI-credit tools are absent by default. Only process startup `KAITEN_MCP_ENABLE_AI=true` opts in locally;
   it cannot bypass the API's authorization or `403 AIUsage.Disabled` deployment policy. Read-only mode
   still excludes all writes. The AI writes that move a customer's credits (usage reports, refunds) and rule
