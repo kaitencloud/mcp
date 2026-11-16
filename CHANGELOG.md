@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+AI credit tools, in preview: registered only with `KAITEN_MCP_ENABLE_AI=true`, and served by Kaiten only
+where AI credits are switched on. The tools marked below need a Kaiten version that serves them: the first release carrying
+[kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/pull/98), to be named here once it is tagged.
+
+### Added
+
+- AI credit tools: `kaiten_get_ai_models`, `kaiten_get_ai_rules`, `kaiten_get_ai_history`,
+  `kaiten_save_ai_model`, `kaiten_save_ai_rule` and `kaiten_report_ai_usage`.
+- `kaiten_explain_ai_charge`: one operation's charge, rebuilt from its own pricing snapshot and usage.
+  Needs the Kaiten version above.
+- `kaiten_list_ai_inferences`: the organization's AI operations across instances and pools, and with
+  `unpriced=true` the usage no rule priced, grouped by model and denial reason. Needs the Kaiten version
+  above.
+- `kaiten_get_ai_rate_card`: a pool's rules on one licence version with their level, and which rule would
+  price a given model.
+- `kaiten_refund_ai_inference`: gives back credits charged for one operation, under an idempotency key.
+  Needs the Kaiten version above.
+- `kaiten_archive_ai_rule`: archives a conversion rule, after showing which rule would price its calls
+  instead.
+- `kaiten_report_ai_usage` takes a commit's `vendor_cost` (needs the Kaiten version above) and says when
+  an answer is a replay; `kaiten_get_ai_history` filters by authorization, model, request type and date.
+
+### Changed
+
+- `kaiten_report_ai_usage` previews the report until called with `confirm=true`: a reserve holds, and a
+  commit charges, a customer's credits.
+- `kaiten_get_ai_history` looks a transaction id up over the pool's whole history, not the last 30 days.
+
 ## [0.4.0] - 2026-11-06
 
 ### Added
