@@ -29,6 +29,8 @@ class Settings:
     host: str
     port: int
     timeout: float
+    # Startup-fixed local opt-in. Only the literal true enables AI attempts.
+    enable_ai: bool = False
 
 
 def load() -> Settings:
@@ -41,6 +43,7 @@ def load() -> Settings:
         api_base_url=base.rstrip("/"),
         api_token=os.getenv("KAITEN_API_TOKEN", "").strip(),
         read_only=_flag("KAITEN_MCP_READ_ONLY"),
+        enable_ai=os.getenv("KAITEN_MCP_ENABLE_AI", "").strip().lower() == "true",
         host=os.getenv("MCP_HOST", "0.0.0.0"),
         port=int(os.getenv("MCP_PORT", "8000")),
         timeout=float(os.getenv("KAITEN_API_TIMEOUT", "30")),

@@ -107,7 +107,7 @@ async def test_shared_sdk_reads_each_callers_credential(monkeypatch):
 
 
 @asynccontextmanager
-async def http_server(monkeypatch, handler):
+async def http_server(monkeypatch, handler, *, ai_enabled: bool = False):
     """Run the production HTTP app with its real request context and a mocked gateway."""
     monkeypatch.setattr(sdk, "settings", replace(sdk.settings, api_token="ksh_process"))
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as upstream:
@@ -119,7 +119,7 @@ async def http_server(monkeypatch, handler):
             )
         )
         try:
-            app = http_app(build(writes=True))
+            app = http_app(build(writes=True, ai_enabled=ai_enabled))
             async with run_asgi_lifespan(app):
                 yield ASGIServer(url="http://127.0.0.1/mcp", app=app, transport_type="http")
         finally:
@@ -136,7 +136,11 @@ async def save(server, headers):
         )
 
 
-async def test_real_http_context_isolates_callers_and_never_uses_the_process_token(monkeypatch):
+# The rollout decides which tools exist, never whose credential is used.
+@pytest.mark.parametrize("ai_enabled", [False, True])
+async def test_real_http_context_isolates_callers_and_never_uses_the_process_token(
+    monkeypatch, ai_enabled
+):
     seen = []
 
     async def record(req):
@@ -144,7 +148,7 @@ async def test_real_http_context_isolates_callers_and_never_uses_the_process_tok
         await asyncio.sleep(0)  # Keep upstream calls overlapping across request contexts.
         return httpx.Response(200, json=CUSTOMER)
 
-    async with http_server(monkeypatch, record) as server:
+    async with http_server(monkeypatch, record, ai_enabled=ai_enabled) as server:
         results = await asyncio.gather(
             save(server, {"Authorization": "Bearer ksh_first"}),
             save(server, {"Authorization": "bEaReR  ksh_second "}),
@@ -187,6 +191,25 @@ async def test_real_http_denial_does_not_retry_with_the_process_token(monkeypatc
     async with http_server(monkeypatch, record) as server:
         result = await save(server, {"Authorization": "Bearer ksh_caller"})
         assert result.is_error and code in result.content[0].text
+    assert seen == ["Bearer ksh_caller"]
+
+
+async def test_real_http_surfaces_a_server_side_ai_refusal_under_the_caller_token(monkeypatch):
+    """With AI on here and off on the server, the refusal is the server's, under the caller's token."""
+    seen = []
+
+    async def record(req):
+        seen.append(req.headers["authorization"])
+        return httpx.Response(
+            403, json={"status": 403, "code": "AIUsage.Disabled", "detail": "disabled"}
+        )
+
+    async with (
+        http_server(monkeypatch, record, ai_enabled=True) as server,
+        server.client(headers={"Authorization": "Bearer ksh_caller"}) as client,
+    ):
+        result = await client.call_tool("kaiten_get_ai_models", {}, raise_on_error=False)
+        assert result.is_error and "AIUsage.Disabled" in result.content[0].text
     assert seen == ["Bearer ksh_caller"]
 
 

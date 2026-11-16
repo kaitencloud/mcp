@@ -121,6 +121,9 @@ curl http://localhost:8000/health
   Invalid tokens and missing scopes are rejected by Kaiten, never retried as the process token.
 - MCP initialization/tool discovery and `/health` are public. Host/Origin checks are not caller
   authentication; use TLS when sending tokens to a remote server.
+- AI-credit tools are absent by default. Only process startup `KAITEN_MCP_ENABLE_AI=true` opts in locally;
+  it cannot bypass the API's authorization or `403 AIUsage.Disabled` deployment policy. Read-only mode
+  still excludes all writes. See README's experimental AI section before enabling.
 - Give an agent the least it needs. A read-only server (`KAITEN_MCP_READ_ONLY=true`) cannot even attempt a
   write, whatever its token allows.
 - Never commit a client configuration that contains a token; prefer environment variables or a prompt.

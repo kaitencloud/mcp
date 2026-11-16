@@ -20,7 +20,7 @@ from typing import Any
 
 from fastmcp.exceptions import ToolError
 
-from . import sdk, shapes
+from . import ai_policy, sdk, shapes
 
 # Concurrent requests a single tool call may have in flight.
 FANOUT = 8
@@ -45,6 +45,7 @@ class Snapshot:
     entitlements: dict[str, Any]
     plans: dict[str, str]  # license family id -> plan slug
     usage: dict[str, list[Any]] = field(default_factory=dict)
+    ai_enabled: bool = False
 
     def license_of(self, inst: Any) -> Any:
         return self.licenses.get(inst.license_slug)
@@ -59,6 +60,7 @@ async def snapshot(
     *,
     keep: Callable[[Any], bool] | None = None,
     with_usage: bool = True,
+    ai_enabled: bool = False,
 ) -> Snapshot:
     k = sdk.kaiten()
     if instances is None:
@@ -71,6 +73,7 @@ async def snapshot(
         licenses={lic.slug: lic for lic in licenses},
         entitlements={e.slug: e for e in entitlements},
         plans=plans,
+        ai_enabled=ai_enabled,
     )
     if with_usage:
         rows = await gather_bounded(k.instances.list_usage(i.slug) for i in snap.instances)
@@ -87,8 +90,12 @@ def entitlements_view(snap: Snapshot, inst: Any) -> dict[str, Any]:
     limits, features, config = [], {}, {}
     for u in snap.usage.get(inst.slug, []):
         slug_ = u.entitlement_slug
+        # A usage row states the value's type, not the entitlement's, so the AI
+        # policy classifies this row from the catalogue definition.
+        definition = snap.entitlements.get(slug_)
+        if not ai_policy.visible(u, enabled=snap.ai_enabled, definition=definition):
+            continue
         if u.value.type == "number":
-            definition = snap.entitlements.get(slug_)
             row = {
                 "entitlement": slug_,
                 **shapes.effective_usage(

@@ -17,7 +17,7 @@ from fastmcp import FastMCP
 from kaitencloud import ConflictError
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import DESTRUCTIVE
 
 Kind = Literal[
@@ -46,7 +46,7 @@ _RESOURCE = {
 }
 
 
-async def impact(kind: str, slug: str, resource: Any) -> dict:
+async def impact(kind: str, slug: str, resource: Any, *, ai_enabled: bool = False) -> dict:
     """What depends on the resource, as far as the API lets us see."""
     k = sdk.kaiten()
     if kind in ("customer", "license", "deployment_zone"):
@@ -59,10 +59,17 @@ async def impact(kind: str, slug: str, resource: Any) -> dict:
             "instances": [i.slug for i in await k.instances.list() if getattr(i, attr) == slug]
         }
         if kind == "license":
-            out["grants"] = [g.entitlement_slug for g in await k.licenses.list_entitlements(slug)]
+            definitions = {e.slug: e for e in await k.entitlements.list()}
+            out["grants"] = [
+                g.entitlement_slug
+                for g in await k.licenses.list_entitlements(slug)
+                if ai_policy.visible(
+                    g, enabled=ai_enabled, definition=definitions.get(g.entitlement_slug)
+                )
+            ]
         return out
     if kind == "instance":
-        snap = await views.snapshot([resource])
+        snap = await views.snapshot([resource], ai_enabled=ai_enabled)
         used = [
             r["entitlement"]
             for r in views.entitlements_view(snap, resource)["limits"]
@@ -108,7 +115,7 @@ async def impact(kind: str, slug: str, resource: Any) -> dict:
     return {}
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     if not writes:
         return
 
@@ -130,8 +137,29 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         resource_api = getattr(sdk.kaiten(), _RESOURCE[kind])
         s = shapes.slug(slug, kind)
         resource = await sdk.require(resource_api.get(s), f"{kind} {s!r}")
+        if kind == "entitlement":
+            ai_policy.require_available(resource, enabled=ai_enabled)
+        if confirm and not ai_enabled:
+            if kind == "license":
+                await ai_policy.require_license_available(s, enabled=ai_enabled)
+            elif kind == "instance":
+                await ai_policy.require_license_available(resource.license_slug, enabled=ai_enabled)
+            elif kind == "customer":
+                for inst in await sdk.kaiten().instances.list():
+                    if inst.customer_slug == s:
+                        await ai_policy.require_license_available(
+                            inst.license_slug, enabled=ai_enabled
+                        )
+            elif kind == "entitlement_group":
+                for e in await sdk.kaiten().entitlements.list():
+                    if any(g.slug == s for g in e.entitlement_groups or []):
+                        ai_policy.require_available(e, enabled=ai_enabled)
         label = getattr(resource, "name", None) or getattr(resource, "version", None) or s
-        blast = {key: v for key, v in (await impact(kind, s, resource)).items() if v}
+        blast = {
+            key: v
+            for key, v in (await impact(kind, s, resource, ai_enabled=ai_enabled)).items()
+            if v
+        }
         if not confirm:
             return shapes.report(
                 "preview",

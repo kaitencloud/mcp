@@ -16,7 +16,8 @@ target feature flags and ship releases — in Kaiten's own vocabulary, not in HT
 ## Design
 
 The previous server turned every OpenAPI operation into a tool: 105 tools, one per endpoint, each asking
-the agent for UUIDs and full replacement bodies. This one exposes **46 tools**, each an intent, built on the
+the agent for UUIDs and full replacement bodies. This one exposes **46 tools by default**, plus six
+experimental AI-credit intents when explicitly enabled, built on the
 rules in Kaiten's product vision for agent-readiness:
 
 - **Tools express an intent, not a CRUD mirror.** `kaiten_provision_instance` resolves a License family to its
@@ -44,6 +45,9 @@ arithmetic (`kaitencloud.usage`) and its flag builders (`kaitencloud.targeting`)
 MCP by bumping the SDK. Kaiten Cloud's webhook routes are in no OpenAPI document: the server calls them in the
 shapes Kaiten's console sends, and carries the catalogue of the event types they subscribe to, read from the SDK's models, generated from
 Kaiten's contract.
+AI control-plane endpoints not yet wrapped by the installed SDK use its authenticated transport,
+like targeting authoring; their intent inputs follow the Kaiten OpenAPI contract without editing
+generated code.
 
 ## Tools
 
@@ -52,6 +56,7 @@ Kaiten's contract.
 | Orientation | `kaiten_overview` · `kaiten_search` | |
 | Customers & instances | `kaiten_get_customer` · `kaiten_get_instance` · `kaiten_list_instances` | `kaiten_save_customer` · `kaiten_provision_instance` · `kaiten_update_instance` |
 | Usage | `kaiten_get_usage` · `kaiten_get_usage_reports` | `kaiten_report_usage` |
+| AI credits (opt-in only) | `kaiten_get_ai_models` · `kaiten_get_ai_rules` · `kaiten_get_ai_history` | `kaiten_save_ai_model` · `kaiten_save_ai_rule` · `kaiten_report_ai_usage` |
 | Catalog & Licenses | `kaiten_get_catalog` | `kaiten_save_entitlement` · `kaiten_save_license` · `kaiten_set_license_state` |
 | Billing | `kaiten_get_billing` · `kaiten_get_prices` · `kaiten_get_invoices` | `kaiten_save_prices` · `kaiten_save_plan_settings` · `kaiten_subscribe_instance` · `kaiten_cancel_subscription` · `kaiten_set_instance_addon` · `kaiten_save_voucher` · `kaiten_redeem_voucher` · `kaiten_mark_invoice_paid` |
 | Feature flags | `kaiten_get_flags` · `kaiten_evaluate_flags` · `kaiten_test_rule` | `kaiten_save_flag` |
@@ -65,48 +70,77 @@ Each tool's description and input schema are the reference; `kaiten_overview` is
 In the tools' arguments, `plan` is a License family, whose current version an instance moves to, and
 `license` an exact License version.
 
-How a version is sold is the version's own, and `kaiten_save_license` sets it with or without billing:
-`pricing` (FREE and PAID can be bought self-serve; CUSTOM, a new plan's default, sends a buyer to its
-`self_serve_cta_url`), `requires_payment_method` and `trial_days`. A new version is sold as the one it is
-made from. What a plan does across its versions — whether the public catalogue lists it, the FREE plan its
-instances fall back to when a subscription ends, how its trials end — is set with `kaiten_save_plan_settings`,
-a billing tool. The public catalogue offers a public plan's default version only, once it is published.
+## AI credit control plane
 
-A customer's billing e-mail is where invoices sent to it go: `kaiten_get_customer` shows it, and
-`kaiten_save_customer` sets it, or removes it with `""`. Stripe needs one to send an invoice (`SEND_INVOICE`).
+AI discovery and attempts are **off by default**. Set `KAITEN_MCP_ENABLE_AI=true` before starting the
+process to register the experimental module: three AI reads in read-only mode, all six intents in write
+mode. Unset, false and malformed values deny; only `true` (case-insensitive, surrounding whitespace
+ignored) opts in. Restart the process to change this fixed policy. The default schema and initialization
+instructions contain no AI-credit choices or guidance, and calls to unregistered AI names make no API requests.
 
-The billing tools need billing to be on for the organization: `kaiten_get_billing` says whether it is, and
-why not, and the others answer with that explanation rather than a bare 403. A voucher's code is a secret:
-answers show its last four characters (`code_hint`), and the full code only in the answer of
-`kaiten_save_voucher` that creates it, where the caller just gave it. Each tool names the scopes it needs in
-its description:
+This is local opt-in, **not authorization**. The API independently authenticates/scopes the caller and
+requires its deployment AI policy; a server `403 AIUsage.Disabled` remains authoritative, even with local
+opt-in or caller metadata. No tool changes that policy or calls a provider. Plan a quiesce/drain before
+server disable: disabling during inference may leave settlement pending; retain the transaction identity.
 
-| Billing tool | Scopes |
-| --- | --- |
-| `kaiten_get_billing` | `read:billing`; `read:addons` and `read:vouchers` for what is on sale; `read:instances` and `read:voucher_redemptions` for an instance |
-| `kaiten_get_prices` | `read:licenses` |
-| `kaiten_get_invoices` | `read:billing` |
-| `kaiten_save_prices` | `write:licenses` |
-| `kaiten_save_plan_settings` | `write:licenses` |
-| `kaiten_subscribe_instance` | `write:billing`, `read:instances`, `read:licenses` |
-| `kaiten_cancel_subscription` | `write:billing`, `read:instances` |
-| `kaiten_set_instance_addon` | `write:instances` |
-| `kaiten_save_voucher` | `write:vouchers`; `read:licenses` to restrict it to License versions |
-| `kaiten_redeem_voucher` | `write:voucher_redemptions` |
-| `kaiten_mark_invoice_paid` | `write:billing` |
+While locally off, generic AI entitlement/grant changes, removals, copies and numeric adjustments are
+refused before writes. Mixed grant patches are validated in full before license creation/update; ordinary
+patches keep unmentioned hidden grants rather than deleting them. Operational catalogs/search/usage and
+instance/customer views omit classified AI rows using contract types, never arbitrary config/metadata
+keys. Immutable audit evidence (including journal/invoice data in payloads) remains readable unchanged;
+AI inference/reservation history is a separate gated operational surface. Financial precision is not
+recomputed from the numeric operational usage view.
 
-Webhooks are part of Kaiten Cloud, for an organization whose Kaiten License grants webhook events; the tools
-need `read:webhooks` and `write:webhooks`. Where they are not served, the tools say why, and point a
-self-hosted Kaiten to its [event stream](https://docs.kaiten.sh/docs/self-hosting/consuming-events), which
-carries the same event types. `kaiten_get_webhooks(events="warning threshold")` finds a type from the
-catalogue on any edition, and `kaiten_save_webhook` shows a new endpoint's signing secret in the answer that
-creates it, and nowhere else.
+Targeting inspection uses Core's original-type metadata (`entitlementType` on known schema entries,
+`entitlementTypes` beside rehearsal facts), without extra catalogue requests or read permissions. Only
+`__kaiten.entitlements` entries are filtered; arbitrary CONFIG values, metadata, CEL and ordinary flag
+results are unchanged. Older servers without this metadata have unclassified entitlement suggestions
+and facts omitted while locally off, rather than assuming a shared NUMBER shape is not AI.
 
-A webhook URL can be a credential as well: a Slack incoming-webhook URL is one. Answers show its scheme and
-host only, `https://hooks.slack.com/…`, never its path, query or user info, and a receiver's response is shown
-with that path taken out. Endpoints on one host are told apart by their id, which `kaiten_delete_webhook`
-takes; `kaiten_save_webhook` and `kaiten_delete_webhook` also take the full URL, and match it without showing
-it.
+The installed SDK's private authenticated HTTP bridge stays in use until a coherent experimental SDK
+namespace/contract is available. No SDK pin change or eager experimental namespace import is required.
+
+
+Models are identities owned by your organization, with exact provider aliases and optional USD vendor
+costs — not a synchronized provider catalogue, credential store, or inference runtime. Model costs use
+string decimals (6 integer digits, 12 decimal places); conversion rates use 8 digits and 10 places;
+credit caps and usage `units` use 12 digits and 6 places. Floats and exponent notation are refused.
+
+- Define a `NUMBER_AI_CREDIT` entitlement with `kaiten_save_entitlement`. It must aggregate by `SUM`;
+  its licence grant and read usage remain ordinary numeric credits. `kaiten_report_usage` accepts only
+  `append` for AI credit adjustments/refunds, never `set`.
+- Grant credits with `kaiten_save_license`, then configure rules with `kaiten_save_ai_rule` on an **exact
+  licence version slug**, such as `premium-v2`. A rule selects an entitlement, an optional model and an
+  optional request type (omitting selectors on creation means wildcard). Inspect `kaiten_get_ai_rules`
+  and use its rule id to edit; an identical edit writes nothing. Creation is not retry-safe: inspect
+  the rules after an uncertain create before trying again. `rates` replaces the rate map; omitted
+  selectors, caps and error policy are preserved on edit. Explicit selector/cap clearing and rule
+  archival are not exposed by these bounded intents.
+- Editing rules changes the instances on that version immediately. Prefer a new version and configure
+  its rules explicitly: `kaiten_save_license(new_version_of=...)` copies grants, **not AI rules**.
+  Model and rule reads are available on read-only servers; authoring and reports are not.
+- `kaiten_report_ai_usage(phase="reserve", ...)` holds estimated credits before your application sends
+  a provider request. Supply a model identity or exact alias, request type and quantities. Commit the
+  actual quantities with `phase="commit"` and `request_status` (`SUCCESS`, `PROVIDER_ERROR`,
+  `CUSTOMER_ERROR`, or `NOT_SENT` to release an unsent request). Commit can omit model/request type to
+  inherit a reservation. `usage={}` is allowed; `units` and `unitType` must be supplied together.
+- Use the same `transaction_id` for reserve and commit, scoped to instance + entitlement. It is 1–128
+  exact characters from `[A-Za-z0-9._:-]`; retry only the identical phase/body. The tool never sends
+  `Idempotency-Key`. A changed retry is a conflict, not a new charge. Reservation TTL is validated
+  against the deployment's configured maximum by Kaiten; commits refuse TTL. Reservations do not lock
+  rates, and commits account actual usage even beyond limits. Inspect the returned `usage.ai` status,
+  authorization, warnings, exact credits and remaining balance — a recorded commit is not authorization
+  to run inference.
+- `kaiten_get_ai_history` returns one bounded inference page with the API cursor, or open reservations
+  with `open_reservations=true`. It preserves transaction identities and exact credit strings. Normal
+  API denial/conflict codes reach the agent unchanged. No tool calls an AI provider.
+
+Example rule input: `license="premium-v2", entitlement="ai-credits", model="assistant",
+request_type="COMPLETION", rates={"perInputToken": "0.000001", "perOutputToken": "0.000002"}`.
+AI `usage` accepts `inputTokens`, `outputTokens`, `cacheReadInputTokens`, `cacheWriteInputTokens`,
+`durationMs` (non-negative int64 integers), and `units`/`unitType` (`image`, `second`, `frame`).
+Rates additionally accept `perCachedInputToken`, `perCacheWriteToken`, `perRequest`, `perSecond` and
+`perUnit`; vendor costs accept those except `perSecond`.
 
 ## Running it
 
@@ -140,6 +174,7 @@ get a token.
 | --- | --- | --- |
 | `KAITEN_API_BASE_URL` | `http://localhost:6060/api` | Kaiten's **gateway**: it is what accepts a `ksh_` token. Not the API container |
 | `KAITEN_API_TOKEN` | | The token for stdio only; never used for HTTP requests |
+| `KAITEN_MCP_ENABLE_AI` | `false` | Explicit `true` registers experimental AI intents; not server authorization |
 | `KAITEN_MCP_READ_ONLY` | `false` | Register read tools only (also `--read-only`) |
 | `MCP_HOST` / `MCP_PORT` | `0.0.0.0` / `8000` | HTTP listener |
 | `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | | Comma-separated allowlists for the HTTP transport's Host/Origin check. Without them, the check applies when bound to localhost only |

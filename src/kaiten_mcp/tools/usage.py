@@ -13,7 +13,7 @@ from kaitencloud import ThresholdExceededError, TransactionIdReusedError
 from kaitencloud.types import UsageBehavior
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import APPEND, READ
 
 State = Literal["ok", "warning", "at_limit", "overage", "over", "unlimited"]
@@ -23,8 +23,7 @@ State = Literal["ok", "warning", "at_limit", "overage", "over", "unlimited"]
 WALK = 2000
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
-    @mcp.tool(annotations=READ)
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     async def kaiten_get_usage(
         entitlement: Annotated[
             str | None, Field(description="Only this entitlement (slug)")
@@ -49,8 +48,17 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         unlimited. The row of an entitlement that resets carries its window: period_start and resets_at."""
         k = sdk.kaiten()
         snap = await views.snapshot(
-            await k.instances.list(), keep=lambda i: not customer or i.customer_slug == customer
+            await k.instances.list(),
+            keep=lambda i: not customer or i.customer_slug == customer,
+            ai_enabled=ai_enabled,
         )
+        if entitlement:
+            eslug = shapes.slug(entitlement, "entitlement")
+            # The catalogue definition is what classifies a pool, and every
+            # entitlement an instance can hold is in it: the grants this used to
+            # walk as well said nothing more, and the snapshot no longer carries
+            # them -- a usage row states its value's type, not the entitlement's.
+            ai_policy.require_available(snap.entitlements.get(eslug), enabled=ai_enabled)
         rows = []
         for i in snap.instances:
             if plan and snap.plan_of(i) != plan:
@@ -76,6 +84,15 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         return shapes.drop_none(
             {"total": len(rows), "usage": rows[:limit], "truncated": len(rows) > limit or None}
         )
+
+    # While the rollout is off, the tool a client discovers says nothing of AI
+    # credits: a pool is invisible to it, so naming one here would only describe
+    # rows this deployment never returns.
+    if not ai_enabled and kaiten_get_usage.__doc__:
+        kaiten_get_usage.__doc__ = kaiten_get_usage.__doc__.replace(
+            "metered (NUMBER and AI credit) entitlements", "metered NUMBER entitlements", 1
+        )
+    mcp.tool(annotations=READ)(kaiten_get_usage)
 
     @mcp.tool(annotations=READ)
     async def kaiten_get_usage_reports(
@@ -128,9 +145,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
     @mcp.tool(annotations=APPEND)
     async def kaiten_report_usage(
         instance: Annotated[str, Field(description="Instance slug")],
-        entitlement: Annotated[
-            str, Field(description="Metered entitlement slug (NUMBER or NUMBER_AI_CREDIT)")
-        ],
+        entitlement: Annotated[str, Field(description="Metered entitlement slug")],
         amount: Annotated[float, Field(description="Quantity to report")],
         behavior: Annotated[
             UsageBehavior,
@@ -162,7 +177,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         k = sdk.kaiten()
         inst = await views.instance(instance)
         eslug = shapes.slug(entitlement, "entitlement")
-        snap = await views.snapshot([inst])
+        snap = await views.snapshot([inst], ai_enabled=ai_enabled)
         prior = next(
             (u for u in snap.usage.get(inst.slug, []) if u.entitlement_slug == eslug), None
         )
@@ -172,10 +187,15 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 "nor an exception grants it; nothing to report against."
             )
         definition = snap.entitlements.get(eslug)
+        ai_policy.require_available(prior, enabled=ai_enabled, definition=definition)
         if prior.value.type != "number":
             raise ToolError(
                 f"{eslug} is a {definition.type if definition else prior.value.type} entitlement: only NUMBER and "
                 "NUMBER_AI_CREDIT are metered."
+            )
+        if ai_policy.is_ai(prior, definition) and behavior != "append":
+            raise ToolError(
+                "AI credit adjustments accept only append; use kaiten_report_ai_usage for model quantities."
             )
         warn = definition.warning_threshold_percent if definition else None
         before = shapes.effective_usage(prior, warn)

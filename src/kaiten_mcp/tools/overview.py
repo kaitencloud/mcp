@@ -11,7 +11,7 @@ from typing import Annotated, Any, Literal
 from fastmcp import FastMCP
 from pydantic import Field
 
-from .. import sdk, shapes, views
+from .. import ai_policy, sdk, shapes, views
 from . import READ
 
 Kind = Literal[
@@ -54,7 +54,7 @@ def _label(kind: str, item: Any) -> str | None:
     return getattr(item, "name", None)
 
 
-def register(mcp: FastMCP, *, writes: bool) -> None:
+def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     @mcp.tool(annotations=READ)
     async def kaiten_overview(
         attention_within_days: Annotated[
@@ -72,7 +72,7 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
             k.license_families.list(),
             k.deployment_zones.list(),
             k.releases.list(),
-            views.snapshot(),
+            views.snapshot(ai_enabled=ai_enabled),
         )
         release_version = {r.id: r.version for r in releases}
         per_zone: dict[str, int] = {}
@@ -84,7 +84,9 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
                 "customers": len(customers),
                 "instances": len(snap.instances),
                 "plans": len(families),
-                "entitlements": len(snap.entitlements),
+                "entitlements": sum(
+                    ai_policy.visible(e, enabled=ai_enabled) for e in snap.entitlements.values()
+                ),
                 "feature_flags": len(flags),
                 "deployment_zones": len(zones),
                 "releases": len(releases),
@@ -143,6 +145,8 @@ def register(mcp: FastMCP, *, writes: bool) -> None:
         matches = []
         for kind, items in zip(wanted, results, strict=True):
             for item in items:
+                if kind == "entitlement" and not ai_policy.visible(item, enabled=ai_enabled):
+                    continue
                 hay = [str(getattr(item, a, None) or "").lower() for a in _SEARCH[kind][1]]
                 label = _label(kind, item)
                 hay.append(str(label or "").lower())
