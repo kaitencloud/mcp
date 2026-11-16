@@ -7,8 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 AI credit tools, in preview: registered only with `KAITEN_MCP_ENABLE_AI=true`, and served by Kaiten only
-where AI credits are switched on. The tools marked below need a Kaiten version that serves them: the first release carrying
-[kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/pull/98), to be named here once it is tagged.
+where AI credits are switched on. The tools marked below need **Kaiten 26.11.3 or later**, the first
+release carrying [kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/pull/98).
 
 ### Added
 

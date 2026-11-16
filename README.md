@@ -73,8 +73,8 @@ In the tools' arguments, `plan` is a License family, whose current version an in
 ## AI credit control plane
 
 AI credits are in **preview**: Kaiten serves them only where its platform flag is on, and the charge
-explanations, the organization listing, refunds, vendor costs on commits and rule authors need a Kaiten
-version that serves them (version to be set). The AI tools are **off by default** in this server. Set
+explanations, the organization listing, refunds, vendor costs on commits and rule authors need
+**Kaiten 26.11.3 or later**. The AI tools are **off by default** in this server. Set
 `KAITEN_MCP_ENABLE_AI=true` before starting the process to register the experimental module: six AI reads
 in read-only mode, all eleven intents in write mode. Unset, false and malformed values deny; only `true`
 (case-insensitive, surrounding whitespace ignored) opts in. Restart the process to change this fixed
