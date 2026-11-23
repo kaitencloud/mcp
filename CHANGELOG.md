@@ -33,6 +33,11 @@ release carrying [kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/p
 - `kaiten_report_ai_usage` previews the report until called with `confirm=true`: a reserve holds, and a
   commit charges, a customer's credits.
 - `kaiten_get_ai_history` looks a transaction id up over the pool's whole history, not the last 30 days.
+- `kaiten_update_instance` sends only the metadata keys passed (`null` removes one), for Kaiten to merge
+  into what it holds with `PATCH /instances/{slug}`, so a change another caller makes to other keys
+  meanwhile is kept. A Kaiten whose `PATCH` takes no metadata refuses the member before applying
+  anything; the tool then writes the merged metadata back whole with a `PUT`, as before, and says so in
+  its answer.
 
 ## [0.4.0] - 2026-11-06
 
