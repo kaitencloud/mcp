@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
+from kaitencloud import UnprocessableEntityError
 from kaitencloud.types import InstanceStatus
 from pydantic import Field
 
@@ -30,6 +31,29 @@ def _comparable(i: Any) -> dict:
         "status": i.status,
         "lifecycle_stage": i.lifecycle_stage,
     }
+
+
+def _no_metadata_patch(e: UnprocessableEntityError) -> bool:
+    """A Kaiten whose PATCH /instances/{slug} has no metadata member refuses one, before applying
+    anything, as an unexpected property of the body."""
+    return any(
+        d.location == "body.metadata" and d.message == "unexpected property" for d in e.errors
+    )
+
+
+async def _patch_metadata(slug: str, metadata: dict[str, Any]) -> bool:
+    """Merge metadata keys into an instance's metadata on Kaiten's side: a key set is replaced, a
+    key set to null removed, the others kept. False when this Kaiten cannot."""
+    try:
+        # Not in the SDK yet; a merge is safe to repeat.
+        await sdk.call_unwrapped(
+            "PATCH", f"instances/{slug}", {"metadata": metadata}, idempotent=True
+        )
+    except UnprocessableEntityError as e:
+        if _no_metadata_patch(e):
+            return False
+        raise
+    return True
 
 
 async def _summary(inst: Any, *, ai_enabled: bool = False) -> dict:
@@ -345,7 +369,10 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
         ] = None,
         metadata: Annotated[
             dict[str, Any] | None,
-            Field(description="Keys to set; a key set to null is removed. Other keys are kept"),
+            Field(
+                description="Keys to set, each value replacing the key's whole value; a key set to null "
+                "is removed. Other keys are kept"
+            ),
         ] = None,
         status: Annotated[InstanceStatus | None, Field(description="Operational status")] = None,
         lifecycle_stage: Annotated[
@@ -355,7 +382,9 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
     ) -> dict:
         """Change an instance: rename it, change its plan or license version, deploy or migrate it to a zone, renew or
         move its license term, edit metadata keys, or set its status and lifecycle stage. Only what you pass changes.
-        The answer reports what Kaiten now holds: a call that changes nothing says 'unchanged'."""
+        Metadata keys are merged by Kaiten into what it holds; a Kaiten that cannot has them written back whole,
+        and the answer notes it. The answer reports what Kaiten now holds: a call that changes nothing says
+        'unchanged'."""
         if license_end and extend_license_days:
             raise ToolError("Pass license_end or extend_license_days, not both.")
         k = sdk.kaiten()
@@ -391,7 +420,6 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
             "deployment_zone_id": zone_id,
             "start": start,
             "end": end,
-            "metadata": shapes.merge_map(cur.metadata, metadata),
         }
         old = {
             "name": cur.name,
@@ -400,9 +428,9 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
             "deployment_zone_id": cur.deployment_zone_id,
             "start": shapes.as_time(cur.start_license_date),
             "end": shapes.as_time(cur.end_license_date),
-            "metadata": cur.metadata or {},
         }
-        if new != old:
+
+        async def put(meta: dict) -> None:
             await k.instances.update(
                 cur.slug,
                 name=new["name"],
@@ -412,8 +440,23 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
                 deployment_zone_id=new["deployment_zone_id"],
                 start_license_date=new["start"],
                 end_license_date=new["end"],
-                metadata=new["metadata"],
+                metadata=meta,
             )
+
+        notes = []
+        # A PUT replaces the whole instance, metadata included: it restates the metadata as read,
+        # and comes first, so that the merge below is the last word on the keys passed.
+        if new != old:
+            await put(cur.metadata or {})
+        if metadata and not await _patch_metadata(cur.slug, metadata):
+            # This Kaiten's PATCH takes no metadata: merge here what was read, write it back whole.
+            merged = shapes.merge_map(cur.metadata, metadata)
+            if merged != (cur.metadata or {}):
+                await put(merged)
+                notes.append(
+                    "this Kaiten does not merge metadata on PATCH: the metadata was read and "
+                    "written back whole, so a change another caller made to it in between is lost"
+                )
         if status and status != cur.status:
             await k.instances.update_status(cur.slug, status)
         if lifecycle_stage is not None and lifecycle_stage != cur.lifecycle_stage:
@@ -427,7 +470,6 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
             for end_ in ("from", "to"):
                 if hasattr(change[end_], "isoformat"):
                     change[end_] = shapes.rfc3339(change[end_])
-        notes = []
         if "deployment_zone" in actual:
             notes.append(
                 "deployed to a zone (INSTANCE_DEPLOYED)"

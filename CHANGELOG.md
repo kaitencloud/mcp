@@ -33,6 +33,18 @@ release carrying [kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/p
 - `kaiten_report_ai_usage` previews the report until called with `confirm=true`: a reserve holds, and a
   commit charges, a customer's credits.
 - `kaiten_get_ai_history` looks a transaction id up over the pool's whole history, not the last 30 days.
+- `kaiten_update_instance` sends only the metadata keys passed (`null` removes one), for Kaiten to merge
+  into what it holds with `PATCH /instances/{slug}`, so a change another caller makes to other keys
+  meanwhile is kept. A Kaiten whose `PATCH` takes no metadata refuses the member before applying
+  anything; the tool then writes the merged metadata back whole with a `PUT`, as before, and says so in
+  its answer.
+- `kaiten_save_flag` checks a beta's prerequisites before it writes one. A flag whose metadata `stage` is
+  `private_beta`, `public_beta` or `open_beta`, or whose rules read `betaAccess`, `betaOptIn` or
+  `betaOptOut` on the instance, needs those lists declared as instance metadata fields that accept its
+  slug: otherwise its rules can never match. When one is missing or refuses the slug, nothing is written
+  and the answer carries, under `beta.fix`, the `kaiten_save_metadata_field` calls that prepare them. The
+  check runs only when a call makes the flag a beta, moves its stage or changes which lists its rules
+  read, so turning a beta off is never held back. `kaiten_get_flags` shows the same state for one flag.
 
 ## [0.4.0] - 2026-11-06
 

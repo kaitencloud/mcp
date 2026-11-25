@@ -16,6 +16,7 @@ edited and written back; the wire shapes are the SDK's (kaitencloud.targeting).
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -36,6 +37,85 @@ RULES_DESCRIPTION = (
     "__kaiten.customer.{slug,domain}, __kaiten.deploymentZone.{slug,type,metadata}, targetingKey, plus any attribute "
     "your app sends. kaiten_test_rule lists them all"
 )
+
+# A beta is a convention over three things Kaiten already has: the flag's
+# metadata names its stage, its rules read three lists of flag slugs on the
+# instance, and each list is a typed metadata field whose enumeration names the
+# flags in beta. A rule reading a list that is not declared, or that refuses
+# the flag's slug, lints clean and never matches: nobody can be put in it.
+BETA_STAGES = ("private_beta", "public_beta", "open_beta")
+BETA_LISTS = {
+    "betaAccess": "Beta access",
+    "betaOptIn": "Beta opt-in",
+    "betaOptOut": "Beta opt-out",
+}
+_BETA_LIST_READ = re.compile(
+    r"""metadata\s*(?:\.\s*|\[\s*['"])(betaAccess|betaOptIn|betaOptOut)\b"""
+)
+
+
+def beta_reads(targetings: list[dict]) -> set[str]:
+    """The beta lists a flag's rules read."""
+    return {key for t in targetings for key in _BETA_LIST_READ.findall(t.get("rule") or "")}
+
+
+def beta_shape(w: dict) -> tuple[str | None, set[str]]:
+    """A flag's beta stage, if its metadata names one, and the lists its rules read."""
+    stage = (w.get("metadata") or {}).get("stage")
+    return (stage if stage in BETA_STAGES else None), beta_reads(w.get("targetings") or [])
+
+
+def _list_schema(values: list[str]) -> dict:
+    return {"type": "array", "items": {"type": "string", "enum": values}, "uniqueItems": True}
+
+
+async def beta_lists(fslug: str, stage: str | None, reads: set[str]) -> dict | None:
+    """Whether the instance lists a beta flag needs are ready, and the calls that prepare them.
+
+    A flag at a beta stage needs the three lists, since moving it to the next stage only changes
+    its rules; a flag with no stage needs the ones its rules read. None when it needs none.
+    """
+    needed = list(BETA_LISTS) if stage else [key for key in BETA_LISTS if key in reads]
+    if not needed:
+        return None
+    fields = {
+        f.key: f for f in await sdk.kaiten().metadata_fields.list("INSTANCE") if not f.archived_at
+    }
+    lists: dict[str, str] = {}
+    fix: list[dict] = []
+    for key in needed:
+        field = fields.get(key)
+        if field is None:
+            lists[key] = "missing"
+            arguments = {
+                "key": key,
+                "label": BETA_LISTS[key],
+                "json_schema": _list_schema([fslug]),
+            }
+        else:
+            schema = field.json_schema or {}
+            items = schema.get("items")
+            values = items.get("enum") if isinstance(items, dict) else None
+            if schema.get("type") != "array":
+                lists[key] = "not a list"
+                continue
+            if values is None or fslug in values:
+                lists[key] = "ready"
+                continue
+            lists[key] = "does not accept this flag"
+            arguments = {
+                "key": key,
+                "json_schema": {**schema, "items": {**items, "enum": [*values, fslug]}},
+            }
+        fix.append({"tool": "kaiten_save_metadata_field", "arguments": arguments})
+    return shapes.drop_none(
+        {
+            "stage": stage,
+            "lists": lists,
+            "ready": all(state == "ready" for state in lists.values()),
+            "fix": fix or None,
+        }
+    )
 
 
 def rule_out(t: dict) -> dict:
@@ -168,17 +248,19 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
         ] = None,
     ) -> dict:
         """Feature flags. Without a flag: one line per flag (type, enabled, default, rule count). With a flag: its
-        variants, default, ordered targeting rules (linted) and metadata, in the shape kaiten_save_flag accepts.
-        To see what a customer actually gets, and which rules fail at evaluation, use kaiten_evaluate_flags."""
+        variants, default, ordered targeting rules (linted) and metadata, in the shape kaiten_save_flag accepts, and
+        for a beta whether the instance lists its rules read are ready. To see what a customer actually gets, and which rules fail at evaluation, use kaiten_evaluate_flags."""
         k = sdk.kaiten()
         if flag:
-            f = await sdk.require(
-                k.feature_flags.get(shapes.slug(flag, "flag")), f"feature flag {flag!r}"
-            )
+            fslug = shapes.slug(flag, "flag")
+            f = await sdk.require(k.feature_flags.get(fslug), f"feature flag {flag!r}")
             out = flag_detail(f)
             broken = await lint(wire(f).get("targetings") or [])
             if broken:
                 out["broken_rules"] = broken
+            beta = await beta_lists(fslug, *beta_shape(wire(f)))
+            if beta:
+                out["beta"] = beta
             return out
         flags = await k.feature_flags.list()
         return {"total": len(flags), "flags": [flag_summary(f) for f in flags]}
@@ -300,12 +382,24 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
         ] = None,
         rules: Annotated[list[dict[str, Any]] | None, Field(description=RULES_DESCRIPTION)] = None,
         metadata: Annotated[
-            dict[str, Any] | None, Field(description="Keys to set; null removes a key")
+            dict[str, Any] | None,
+            Field(
+                description="Keys to set; null removes a key. stage (private_beta, public_beta, open_beta) makes "
+                "the flag a beta; remove it at general availability"
+            ),
         ] = None,
     ) -> dict:
         """Create a feature flag or change one: toggle it, change its variants or default, or replace its targeting
         rules. Every rule is linted before anything is written; a broken rule is refused with the reason, rather than
-        saved to silently never match. Only what you pass changes."""
+        saved to silently never match. Only what you pass changes.
+
+        A beta is a flag whose metadata.stage is private_beta, public_beta or open_beta, default off, with rules
+        reading three lists of flag slugs on the instance: betaAccess (the vendor invites), betaOptIn and betaOptOut
+        (the customer's own choice), e.g. Invited: has(__kaiten.instance) &&
+        has(__kaiten.instance.metadata.betaAccess) && '<flag>' in __kaiten.instance.metadata.betaAccess. Saving one
+        checks that the three lists are declared as instance metadata fields and accept the flag's slug: if not,
+        nothing is written and the answer carries, under beta.fix, the kaiten_save_metadata_field calls that
+        prepare them."""
         k = sdk.kaiten()
         fslug = shapes.slug(flag, "flag")
         cur = await sdk.get_or_none(k.feature_flags.get(fslug))
@@ -383,9 +477,36 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
                 ],
             )
 
+        # Checked only when this call makes the flag a beta, moves its stage or changes which lists
+        # its rules read: a kill switch or a rename of a beta is never held back by its lists.
+        beta = None
+        shape = beta_shape(body)
+        if cur is None or shape != beta_shape(base):
+            beta = await beta_lists(fslug, *shape)
+        if beta and not beta["ready"]:
+            return shapes.report(
+                "rejected",
+                "flag",
+                flag_detail(cur) if cur else None,
+                beta=beta,
+                notes=[
+                    "Nothing was written. A beta's rules read lists of flag slugs on the instance, and a list "
+                    "that is not declared or does not accept this flag can hold nobody: the rules would never "
+                    "match. Run the calls under beta.fix, then save again."
+                ],
+            )
+        invite = (
+            [
+                f"Invite an instance with kaiten_update_instance(metadata={{'betaAccess': [...]}}): its current "
+                f"list plus '{fslug}'. Check who gets the beta with kaiten_evaluate_flags(instance=...)."
+            ]
+            if beta
+            else None
+        )
+
         if cur is None:
             created = await k.feature_flags.create(slug=fslug, **body)
-            return shapes.report("created", "flag", flag_detail(created))
+            return shapes.report("created", "flag", flag_detail(created), beta=beta, notes=invite)
         diff = shapes.changes(flag_detail(cur), flag_detail({**base, **body}))
         if not diff:
             return shapes.report("unchanged", "flag", flag_detail(cur))
@@ -394,5 +515,10 @@ def register(mcp: FastMCP, *, writes: bool, ai_enabled: bool = False) -> None:
         # and orphans the flag. Send the same body with the slug kept.
         await sdk.call_unwrapped("PUT", f"feature-flags/{fslug}", {**body, "slug": fslug})
         return shapes.report(
-            "updated", "flag", flag_detail(await k.feature_flags.get(fslug)), changes=diff
+            "updated",
+            "flag",
+            flag_detail(await k.feature_flags.get(fslug)),
+            changes=diff,
+            beta=beta,
+            notes=invite,
         )
