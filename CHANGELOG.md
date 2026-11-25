@@ -38,6 +38,13 @@ release carrying [kaitencloud/kaiten#98](https://github.com/kaitencloud/kaiten/p
   meanwhile is kept. A Kaiten whose `PATCH` takes no metadata refuses the member before applying
   anything; the tool then writes the merged metadata back whole with a `PUT`, as before, and says so in
   its answer.
+- `kaiten_save_flag` checks a beta's prerequisites before it writes one. A flag whose metadata `stage` is
+  `private_beta`, `public_beta` or `open_beta`, or whose rules read `betaAccess`, `betaOptIn` or
+  `betaOptOut` on the instance, needs those lists declared as instance metadata fields that accept its
+  slug: otherwise its rules can never match. When one is missing or refuses the slug, nothing is written
+  and the answer carries, under `beta.fix`, the `kaiten_save_metadata_field` calls that prepare them. The
+  check runs only when a call makes the flag a beta, moves its stage or changes which lists its rules
+  read, so turning a beta off is never held back. `kaiten_get_flags` shows the same state for one flag.
 
 ## [0.4.0] - 2026-11-06
 
